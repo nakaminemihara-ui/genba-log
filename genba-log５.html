@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>作業伝票 - 株式会社ナカミネ</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    background: #fafaf9;
+    color: #1c1917;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 20px 16px 60px; }
+  .card { background: #fff; border: 1px solid #e7e5e4; border-radius: 10px; }
+  header.card { padding: 12px 16px; margin-bottom: 16px; }
+  header .company { font-size: 12px; color: #a8a29e; }
+  header h1 { font-size: 20px; font-weight: 700; margin: 2px 0 0; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button {
+    flex: 1; padding: 8px; font-size: 14px; font-weight: 600; border-radius: 8px;
+    border: 1px solid #e7e5e4; background: #fff; color: #57534e; cursor: pointer;
+  }
+  .tabs button.active { background: #1c1917; color: #fff; border-color: #1c1917; }
+  .btn-primary {
+    width: 100%; background: #f97316; color: #fff; border: none; border-radius: 8px;
+    padding: 10px; font-size: 14px; font-weight: 600; cursor: pointer; margin-bottom: 12px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn-primary:hover { background: #ea580c; }
+  input, select, textarea {
+    font-family: inherit; font-size: 14px; border: 1px solid #e7e5e4; border-radius: 8px;
+    padding: 9px 10px; background: #fafaf9; outline: none; width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #fb923c; box-shadow: 0 0 0 1px #fb923c; }
+  .search-wrap { position: relative; margin-bottom: 6px; }
+  .search-wrap input { padding-left: 32px; background: #fff; }
+  .search-wrap .icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #a8a29e; font-size: 14px; }
+  .hint { font-size: 11px; color: #a8a29e; margin: 0 0 12px; }
+  .empty {
+    border: 1px dashed #d6d3d1; border-radius: 8px; padding: 36px 10px; text-align: center;
+    color: #a8a29e; font-size: 14px;
+  }
+  ul.entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .entry-card { background: #fff; border: 1px solid #e7e5e4; border-radius: 10px; overflow: hidden; }
+  .entry-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+    padding: 10px 14px 8px; border-bottom: 1px solid #f5f5f4;
+  }
+  .entry-head .label { font-size: 11px; color: #a8a29e; margin: 0; }
+  .entry-head .site { display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 15px; }
+  .entry-head .site .pin { color: #f97316; }
+  .entry-head .right { display: flex; align-items: flex-start; gap: 8px; }
+  .entry-head .date { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #a8a29e; margin-top: 14px; }
+  .del-btn { background: none; border: none; color: #d6d3d1; cursor: pointer; padding: 4px; user-select: none; }
+  .confirm-box {
+    display: flex; align-items: center; gap: 4px; background: #fef2f2; border-radius: 6px; padding: 4px 8px;
+  }
+  .confirm-box span.txt { font-size: 11px; color: #dc2626; white-space: nowrap; }
+  .confirm-box button { background: none; border: none; cursor: pointer; font-size: 12px; padding: 2px 4px; }
+  .confirm-box .yes { color: #dc2626; font-weight: 700; }
+  .confirm-box .no { color: #78716c; }
+  table.detail { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.detail th { text-align: left; font-weight: 400; font-size: 11px; color: #a8a29e; padding-bottom: 4px; }
+  table.detail th.r { text-align: right; }
+  table.detail td { padding: 6px 0; border-top: 1px solid #f5f5f4; color: #44403c; }
+  table.detail td.r { text-align: right; }
+  .entry-body { padding: 4px 14px 8px; }
+  .entry-total { display: flex; justify-content: flex-end; border-top: 1px solid #e7e5e4; margin-top: 4px; padding-top: 6px; }
+  .entry-total .lbl { font-size: 11px; color: #a8a29e; margin-right: 8px; }
+  .entry-total .val { font-size: 14px; font-weight: 600; }
+  .form-card { padding: 16px; }
+  .form-head { display: flex; align-items: flex-start; justify-content: space-between; }
+  .form-head .company { font-size: 11px; color: #a8a29e; margin: 0; }
+  .form-head h2 { font-size: 15px; font-weight: 600; margin: 2px 0 0; }
+  .form-head .close { background: none; border: none; color: #a8a29e; cursor: pointer; font-size: 18px; }
+  .divider { height: 1px; background: #e7e5e4; margin: 12px 0; }
+  .row { display: flex; gap: 12px; margin-bottom: 4px; }
+  .row .grow { flex: 1; }
+  .row .fixed { width: 128px; flex-shrink: 0; }
+  label.sm { display: block; font-size: 11px; color: #78716c; margin-bottom: 4px; }
+  .error { font-size: 11px; color: #ef4444; margin: 0 0 8px; }
+  .line-head { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 6px; }
+  .line-head span.a { font-size: 12px; color: #78716c; }
+  .line-head span.b { font-size: 11px; color: #a8a29e; }
+  .line-item {
+    border: 1px solid #e7e5e4; border-radius: 8px; padding: 10px; background: #fafaf9; margin-bottom: 8px;
+  }
+  .li-row1 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .li-row1 select { flex: 1; background: #fff; }
+  .size-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .size-row input { width: 60px; text-align: right; background: #fff; }
+  .size-row span.sep { font-size: 14px; color: #78716c; }
+  .size-row span.unit { font-size: 11px; color: #a8a29e; }
+  .li-row2 { display: flex; align-items: center; gap: 8px; }
+  .li-row2 .qty { width: 64px; text-align: right; background: #fff; }
+  .li-row2 select.unit { width: 64px; background: #fff; }
+  .price-wrap { flex: 1; position: relative; }
+  .price-wrap span.yen { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #a8a29e; }
+  .price-wrap input { padding-left: 20px; text-align: right; background: #fff; }
+  .li-subtotal { text-align: right; font-size: 11px; color: #a8a29e; margin-top: 4px; }
+  .add-line-btn {
+    width: 100%; border: 1px dashed #d6d3d1; color: #78716c; background: none; border-radius: 8px;
+    padding: 8px; font-size: 13px; cursor: pointer; margin-bottom: 12px;
+  }
+  .grand-total { display: flex; justify-content: flex-end; border-top: 1px solid #e7e5e4; padding-top: 8px; margin-bottom: 12px; }
+  .grand-total .lbl { font-size: 11px; color: #a8a29e; margin-right: 8px; align-self: center; }
+  .grand-total .val { font-size: 16px; font-weight: 700; align-self: center; }
+  .summary-card { padding: 16px; }
+  .summary-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  .summary-head span.title { font-size: 14px; font-weight: 600; }
+  .summary-head select { width: auto; }
+  table.matrix { border-collapse: collapse; font-size: 13px; min-width: 700px; }
+  table.matrix th { font-size: 11px; color: #a8a29e; font-weight: 400; padding-bottom: 6px; text-align: right; padding: 0 6px; }
+  table.matrix th.site-col { text-align: left; position: sticky; left: 0; background: #fff; padding-right: 12px; }
+  table.matrix td { padding: 6px; text-align: right; color: #57534e; }
+  table.matrix td.site-col { text-align: left; position: sticky; left: 0; background: #fff; color: #44403c; padding-right: 12px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.matrix tr.data { border-top: 1px solid #f5f5f4; }
+  table.matrix tr.total { border-top: 2px solid #d6d3d1; font-weight: 600; color: #1c1917; }
+  table.matrix tr.total td.grand { color: #ea580c; font-weight: 700; }
+  .matrix-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+  .note { font-size: 11px; color: #a8a29e; margin-top: 12px; }
+  .detail-month { margin-bottom: 16px; }
+  .detail-month .mh { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .detail-month .mh .m { font-size: 14px; font-weight: 600; color: #292524; }
+  .detail-month .mh .t { font-size: 12px; color: #78716c; }
+  .site-detail-entry { border: 1px solid #e7e5e4; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+  .sde-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: #fafaf9; border-bottom: 1px solid #f5f5f4; font-size: 12px; }
+  .sde-head .amt { font-weight: 600; color: #44403c; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+const WORK_TYPES = ["はつり", "コア抜き", "雑工"];
+const UNITS = ["本", "式", "人"];
+const STORAGE_KEY = "genba-entries-standalone";
+
+// ここにApps ScriptのウェブアプリURLを貼り付けると、全員で共有できるようになります。
+// 空のままだと、この端末のブラウザだけに保存されます(共有されません)。
+const API_URL = "https://script.google.com/macros/s/AKfycbwGNFhuAqrdDYvmJhRyueWSL3VcShs-7JHr6_XapNXDF1PQSOJTlXgpL2wvyHgh67m-/exec";
+
+function uid() {
+  return Date.now().toString() + Math.random().toString(36).slice(2, 7);
+}
+
+function newLineItem() {
+  return { id: uid(), work: WORK_TYPES[0], diameter: "", length: "", width: "", haturiLength: "", depth: "", qty: "", unit: UNITS[0], price: "", location: "", note: "" };
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+let state = {
+  entries: [],
+  tab: "list",
+  showForm: false,
+  query: "",
+  summaryYear: new Date().getFullYear(),
+  summarySite: "",
+  confirmDeleteId: null,
+  confirmDeleteLineId: null,
+  formSiteName: "",
+  formDate: todayStr(),
+  formLineItems: [newLineItem()],
+  formError: "",
+};
+
+async function loadEntries(silent) {
+  if (!API_URL) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      state.entries = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      state.entries = [];
+    }
+    return;
+  }
+  if (!silent) { state.syncing = true; render(); }
+  try {
+    const res = await fetch(API_URL, { cache: "no-store" });
+    const data = await res.json();
+    state.entries = Array.isArray(data) ? data : [];
+    state.syncError = false;
+  } catch (e) {
+    console.error("読み込みに失敗しました", e);
+    state.syncError = true;
+  }
+  state.syncing = false;
+}
+
+async function saveEntries() {
+  if (!API_URL) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
+    } catch (e) {
+      console.error("保存に失敗しました", e);
+    }
+    return;
+  }
+  state.syncing = true; render();
+  try {
+    await fetch(API_URL, { method: "POST", body: JSON.stringify(state.entries) });
+    state.syncError = false;
+  } catch (e) {
+    console.error("保存に失敗しました", e);
+    state.syncError = true;
+  }
+  state.syncing = false;
+}
+
+function fmtYen(n) {
+  return "¥" + Math.round(n).toLocaleString();
+}
+
+function lineTotal(it) {
+  const price = parseFloat(it.price);
+  if (isNaN(price)) return 0;
+  const qty = parseFloat(it.qty);
+  const multiplier = !isNaN(qty) && qty > 0 ? qty : 1;
+  return price * multiplier;
+}
+
+function entryTotal(items) {
+  return (items || []).reduce((sum, it) => sum + lineTotal(it), 0);
+}
+
+function sizeLabel(it) {
+  if (it.work === "コア抜き" && (it.diameter || it.length)) {
+    return "Φ" + (it.diameter || "-") + "×" + (it.length || "-");
+  }
+  if (it.work === "はつり" && (it.width || it.haturiLength || it.depth)) {
+    return (it.width || "-") + "×" + (it.haturiLength || "-") + "×" + (it.depth || "-");
+  }
+  return "";
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+let pressTimer = null;
+function pressStart(fn) {
+  pressTimer = setTimeout(fn, 550);
+}
+function pressEnd() {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+}
+
+function buildSummary(year) {
+  const sitesAll = Array.from(new Set(state.entries.map((e) => e.siteName))).sort();
+  const siteMonth = {};
+  const monthTotal = Array(12).fill(0);
+  sitesAll.forEach((s) => { siteMonth[s] = Array(12).fill(0); });
+  state.entries.forEach((e) => {
+    const y = parseInt(e.date.slice(0, 4), 10);
+    const m = parseInt(e.date.slice(5, 7), 10) - 1;
+    if (y !== year) return;
+    const amount = entryTotal(e.lineItems || []);
+    if (!siteMonth[e.siteName]) siteMonth[e.siteName] = Array(12).fill(0);
+    siteMonth[e.siteName][m] += amount;
+    monthTotal[m] += amount;
+  });
+  const siteYearTotal = {};
+  Object.keys(siteMonth).forEach((s) => { siteYearTotal[s] = siteMonth[s].reduce((a, b) => a + b, 0); });
+  const grandTotal = monthTotal.reduce((a, b) => a + b, 0);
+  return { siteMonth, monthTotal, siteYearTotal, grandTotal, sitesAll };
+}
+
+function render() {
+  const app = document.getElementById("app");
+  app.innerHTML = renderHeader() + renderTabs() + (state.tab === "list" ? renderListTab() : renderSummaryTab());
+  bindEvents();
+}
+
+function renderHeader() {
+  let status = "";
+  if (API_URL) {
+    if (state.syncing) status = `<span style="color:#a8a29e;">同期中…</span>`;
+    else if (state.syncError) status = `<span style="color:#dc2626;">同期に失敗しました</span>`;
+    else status = `<span style="color:#16a34a;">共有オンライン</span>`;
+  } else {
+    status = `<span style="color:#a8a29e;">この端末のみに保存(共有未設定)</span>`;
+  }
+  return `
+    <header class="card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+        <div>
+          <p class="company">株式会社ナカミネ</p>
+          <h1>作業伝票</h1>
+        </div>
+        <div style="text-align:right;">
+          <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
+          ${API_URL ? `<button data-action="refresh" style="font-size:11px;background:#fff;border:1px solid #e7e5e4;border-radius:6px;padding:3px 8px;cursor:pointer;">🔄 更新</button>` : ""}
+        </div>
+      </div>
+    </header>`;
+}
+
+function renderTabs() {
+  return `
+    <div class="tabs">
+      <button data-action="tab" data-tab="list" class="${state.tab === "list" ? "active" : ""}">記録</button>
+      <button data-action="tab" data-tab="summary" class="${state.tab === "summary" ? "active" : ""}">集計</button>
+    </div>`;
+}
+
+function renderListTab() {
+  let html = "";
+  if (!state.showForm) {
+    html += `
+      <button class="btn-primary" data-action="open-form">+ 新規記録</button>
+      <div class="search-wrap">
+        <span class="icon">🔍</span>
+        <input type="text" id="search-input" placeholder="現場名・作業内容で検索" value="${esc(state.query)}" />
+      </div>
+      <p class="hint">ゴミ箱アイコンを長押しすると削除できます</p>
+      ${renderEntryList()}
+    `;
+  } else {
+    html += renderForm();
+  }
+  return html;
+}
+
+function renderEntryList() {
+  const q = state.query.trim().toLowerCase();
+  const filtered = state.entries.filter((e) => {
+    if (!q) return true;
+    const inSite = e.siteName.toLowerCase().includes(q);
+    const inWork = (e.lineItems || []).some((it) => it.work.toLowerCase().includes(q));
+    return inSite || inWork;
+  }).sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  if (filtered.length === 0) {
+    return `<div class="empty">${state.entries.length === 0 ? "まだ記録がありません" : "該当する記録がありません"}</div>`;
+  }
+
+  return `<ul class="entries">` + filtered.map((e) => `
+    <li class="entry-card">
+      <div class="entry-head">
+        <div>
+          <p class="label">現場名</p>
+          <div class="site"><span class="pin">📍</span><span>${esc(e.siteName)}</span></div>
+        </div>
+        <div class="right">
+          ${state.confirmDeleteId === e.id ? `
+            <div class="confirm-box">
+              <span class="txt">削除しますか</span>
+              <button class="yes" data-action="confirm-delete-entry" data-id="${e.id}">はい</button>
+              <button class="no" data-action="cancel-delete-entry">いいえ</button>
+            </div>
+          ` : `
+            <div class="date">📅 ${esc(e.date)}</div>
+            <button class="del-btn" data-action="del-entry" data-id="${e.id}" aria-label="長押しで削除">🗑</button>
+          `}
+        </div>
+      </div>
+      ${(e.lineItems || []).length > 0 ? `
+        <div class="entry-body">
+          <table class="detail">
+            <thead><tr><th>作業内容</th><th>サイズ</th><th class="r">数量</th><th>単位</th><th class="r">金額</th></tr></thead>
+            <tbody>
+              ${e.lineItems.map((it) => `
+                <tr>
+                  <td>${esc(it.work)}${(it.location || it.note) ? `<div style="font-size:11px;color:#a8a29e;font-weight:400;margin-top:2px;">${it.location ? `<div>📍${esc(it.location)}</div>` : ""}${it.note ? `<div>備考: ${esc(it.note)}</div>` : ""}</div>` : ""}</td>
+                  <td>${esc(sizeLabel(it) || "-")}</td>
+                  <td class="r">${esc(it.qty || "-")}</td>
+                  <td>${esc(it.unit)}</td>
+                  <td class="r">${it.price ? esc(fmtYen(lineTotal(it))) : "-"}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+          <div class="entry-total">
+            <span class="lbl">合計</span>
+            <span class="val">${esc(fmtYen(entryTotal(e.lineItems)))}</span>
+          </div>
+        </div>
+      ` : ""}
+    </li>
+  `).join("") + `</ul>`;
+}
+
+function renderForm() {
+  const li = state.formLineItems;
+  return `
+    <div class="card form-card">
+      <div class="form-head">
+        <div>
+          <p class="company">株式会社ナカミネ</p>
+          <h2>作業伝票 新規記録</h2>
+        </div>
+        <button class="close" data-action="close-form">✕</button>
+      </div>
+      <div class="divider"></div>
+      <div class="row">
+        <div class="grow">
+          <label class="sm">現場名</label>
+          <input type="text" id="site-name-input" placeholder="例: 〇〇マンション新築工事" value="${esc(state.formSiteName)}" />
+        </div>
+        <div class="fixed">
+          <label class="sm">日付</label>
+          <input type="date" id="date-input" value="${esc(state.formDate)}" />
+        </div>
+      </div>
+      ${state.formError ? `<p class="error">${esc(state.formError)}</p>` : ""}
+      <div class="line-head">
+        <span class="a">作業内容</span>
+        <span class="b">数量 / 単位 / 単価</span>
+      </div>
+      ${li.map((it) => renderLineItem(it)).join("")}
+      <button class="add-line-btn" data-action="add-line">+ 行を追加</button>
+      <div class="grand-total">
+        <span class="lbl">合計金額</span>
+        <span class="val">${esc(fmtYen(entryTotal(li)))}</span>
+      </div>
+      <button class="btn-primary" data-action="save-entry" style="margin-bottom:0;">保存する</button>
+    </div>
+  `;
+}
+
+function renderLineItem(it) {
+  let sizeBlock = "";
+  if (it.work === "コア抜き") {
+    sizeBlock = `
+      <div class="size-row">
+        <span class="sep">Φ</span>
+        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="diameter" value="${esc(it.diameter)}" />
+        <span class="sep">×</span>
+        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="length" value="${esc(it.length)}" />
+        <span class="unit">mm</span>
+      </div>`;
+  } else if (it.work === "はつり") {
+    sizeBlock = `
+      <div class="size-row">
+        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="width" placeholder="幅" value="${esc(it.width)}" />
+        <span class="sep">×</span>
+        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="haturiLength" placeholder="長さ" value="${esc(it.haturiLength)}" />
+        <span class="sep">×</span>
+        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="depth" placeholder="深さ" value="${esc(it.depth)}" />
+        <span class="unit">mm</span>
+      </div>`;
+  }
+  const confirm = state.confirmDeleteLineId === it.id;
+  return `
+    <div class="line-item">
+      <div class="li-row1">
+        <select data-li="${it.id}" data-field="work">
+          ${WORK_TYPES.map((w) => `<option value="${w}" ${it.work === w ? "selected" : ""}>${w}</option>`).join("")}
+        </select>
+        ${confirm ? `
+          <div class="confirm-box">
+            <span class="txt">削除しますか</span>
+            <button class="yes" data-action="confirm-delete-line" data-id="${it.id}">はい</button>
+            <button class="no" data-action="cancel-delete-line">いいえ</button>
+          </div>
+        ` : `
+          <button class="del-btn" data-action="del-line" data-id="${it.id}" aria-label="長押しでこの行を削除">🗑</button>
+        `}
+      </div>
+      ${sizeBlock}
+      <div class="li-row2">
+        <input class="qty" type="text" inputmode="decimal" data-li="${it.id}" data-field="qty" placeholder="数量" value="${esc(it.qty)}" />
+        <select class="unit" data-li="${it.id}" data-field="unit">
+          ${UNITS.map((u) => `<option value="${u}" ${it.unit === u ? "selected" : ""}>${u}</option>`).join("")}
+        </select>
+        <div class="price-wrap">
+          <span class="yen">¥</span>
+          <input type="text" inputmode="decimal" data-li="${it.id}" data-field="price" placeholder="単価" value="${esc(it.price)}" />
+        </div>
+      </div>
+      ${it.price ? `<p class="li-subtotal">小計 ${esc(fmtYen(lineTotal(it)))}</p>` : ""}
+      <div style="margin-top:8px;">
+        <input type="text" data-li="${it.id}" data-field="location" placeholder="作業場所(例: 1F 駐車場)" value="${esc(it.location)}" style="background:#fff;margin-bottom:6px;" />
+        <textarea data-li="${it.id}" data-field="note" placeholder="備考" rows="2" style="background:#fff;resize:none;">${esc(it.note)}</textarea>
+      </div>
+    </div>
+  `;
+}
+
+function renderSummaryTab() {
+  const summary = buildSummary(state.summaryYear);
+  const summarySites = Object.keys(summary.siteMonth).sort();
+  const monthLabels = ["1","2","3","4","5","6","7","8","9","10","11","12"];
+  const years = Array.from(new Set([state.summaryYear, ...state.entries.map((e) => parseInt(e.date.slice(0, 4), 10))])).sort((a, b) => b - a);
+
+  let matrixHtml;
+  if (summarySites.length === 0) {
+    matrixHtml = `<div class="empty">この年の記録がありません</div>`;
+  } else {
+    matrixHtml = `
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th class="site-col">現場名</th>
+              ${monthLabels.map((m) => `<th>${m}月</th>`).join("")}
+              <th>年間合計</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${summarySites.map((s) => `
+              <tr class="data">
+                <td class="site-col">${esc(s)}</td>
+                ${summary.siteMonth[s].map((v) => `<td>${v ? esc(fmtYen(v)) : "-"}</td>`).join("")}
+                <td style="font-weight:600;color:#1c1917;">${esc(fmtYen(summary.siteYearTotal[s]))}</td>
+              </tr>
+            `).join("")}
+            <tr class="total">
+              <td class="site-col">全現場合計</td>
+              ${summary.monthTotal.map((v) => `<td>${v ? esc(fmtYen(v)) : "-"}</td>`).join("")}
+              <td class="grand">${esc(fmtYen(summary.grandTotal))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">各セルは月別の現場ごとの合計金額です。右端が現場の年間合計、一番下の行が月ごとの全現場合計、右下が${state.summaryYear}年の全体合計です。</p>
+    `;
+  }
+
+  const sitesAvailable = Array.from(new Set(state.entries.map((e) => e.siteName))).sort();
+  let detailHtml;
+  if (!state.summarySite) {
+    detailHtml = `<div class="empty">現場を選択すると月ごとの内容が表示されます</div>`;
+  } else {
+    const siteEntries = state.entries
+      .filter((e) => e.siteName === state.summarySite && parseInt(e.date.slice(0, 4), 10) === state.summaryYear)
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    const byMonth = {};
+    siteEntries.forEach((e) => {
+      const m = parseInt(e.date.slice(5, 7), 10);
+      if (!byMonth[m]) byMonth[m] = [];
+      byMonth[m].push(e);
+    });
+    const months = Object.keys(byMonth).map((m) => parseInt(m, 10)).sort((a, b) => a - b);
+    if (months.length === 0) {
+      detailHtml = `<div class="empty">${state.summaryYear}年の${esc(state.summarySite)}の記録はありません</div>`;
+    } else {
+      detailHtml = months.map((m) => `
+        <div class="detail-month">
+          <div class="mh">
+            <span class="m">${m}月</span>
+            <span class="t">${esc(fmtYen(byMonth[m].reduce((sum, e) => sum + entryTotal(e.lineItems || []), 0)))}</span>
+          </div>
+          ${byMonth[m].map((e) => `
+            <div class="site-detail-entry">
+              <div class="sde-head">
+                <span>📅 ${esc(e.date)}</span>
+                <span class="amt">${esc(fmtYen(entryTotal(e.lineItems || [])))}</span>
+              </div>
+              <table class="detail" style="padding:0 12px;">
+                <tbody>
+                  ${(e.lineItems || []).map((it) => `
+                    <tr>
+                      <td style="padding-left:12px;">${esc(it.work)}${sizeLabel(it) ? `<span style="color:#a8a29e;font-size:11px;margin-left:4px;">${esc(sizeLabel(it))}${it.work === "はつり" ? "mm" : ""}</span>` : ""}${(it.location || it.note) ? `<div style="font-size:11px;color:#a8a29e;margin-top:2px;">${it.location ? `<div>📍${esc(it.location)}</div>` : ""}${it.note ? `<div>備考: ${esc(it.note)}</div>` : ""}</div>` : ""}</td>
+                      <td class="r">${esc(it.qty || "-")}${esc(it.unit)}</td>
+                      <td class="r" style="padding-right:12px;">${it.price ? esc(fmtYen(lineTotal(it))) : "-"}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          `).join("")}
+        </div>
+      `).join("");
+    }
+  }
+
+  return `
+    <div class="card summary-card">
+      <div class="summary-head">
+        <span class="title">年間・現場別集計</span>
+        <select id="year-select">
+          ${years.map((y) => `<option value="${y}" ${y === state.summaryYear ? "selected" : ""}>${y}年</option>`).join("")}
+        </select>
+      </div>
+      ${matrixHtml}
+      <div class="divider"></div>
+      <div class="summary-head">
+        <span class="title">現場別・月別の内容一覧</span>
+        <select id="site-select">
+          <option value="">現場を選択</option>
+          ${sitesAvailable.map((s) => `<option value="${s}" ${s === state.summarySite ? "selected" : ""}>${esc(s)}</option>`).join("")}
+        </select>
+      </div>
+      ${detailHtml}
+    </div>
+  `;
+}
+
+function bindEvents() {
+  document.querySelectorAll('[data-action="tab"]').forEach((el) => {
+    el.addEventListener("click", () => { state.tab = el.dataset.tab; render(); });
+  });
+
+  const openBtn = document.querySelector('[data-action="open-form"]');
+  if (openBtn) openBtn.addEventListener("click", () => { state.showForm = true; render(); });
+
+  const closeBtn = document.querySelector('[data-action="close-form"]');
+  if (closeBtn) closeBtn.addEventListener("click", () => { state.showForm = false; state.formError = ""; render(); });
+
+  const searchInput = document.getElementById("search-input");
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => { state.query = e.target.value; render(); searchInput.focus(); searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length); });
+  }
+
+  // entry delete (long press)
+  document.querySelectorAll('[data-action="del-entry"]').forEach((btn) => {
+    const id = btn.dataset.id;
+    btn.addEventListener("mousedown", () => pressStart(() => { state.confirmDeleteId = id; render(); }));
+    btn.addEventListener("touchstart", () => pressStart(() => { state.confirmDeleteId = id; render(); }));
+    btn.addEventListener("mouseup", pressEnd);
+    btn.addEventListener("mouseleave", pressEnd);
+    btn.addEventListener("touchend", pressEnd);
+  });
+  document.querySelectorAll('[data-action="confirm-delete-entry"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      if (API_URL) await loadEntries(true);
+      state.entries = state.entries.filter((e) => e.id !== id);
+      state.confirmDeleteId = null;
+      await saveEntries();
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="cancel-delete-entry"]').forEach((btn) => {
+    btn.addEventListener("click", () => { state.confirmDeleteId = null; render(); });
+  });
+
+  // form fields
+  const siteNameInput = document.getElementById("site-name-input");
+  if (siteNameInput) {
+    siteNameInput.addEventListener("input", (e) => {
+      state.formSiteName = e.target.value;
+      if (state.formError) state.formError = "";
+    });
+  }
+  const dateInput = document.getElementById("date-input");
+  if (dateInput) dateInput.addEventListener("input", (e) => { state.formDate = e.target.value; });
+
+  // line item fields
+  document.querySelectorAll('[data-li]').forEach((el) => {
+    el.addEventListener(el.tagName === "SELECT" ? "change" : "input", (e) => {
+      const id = el.dataset.li;
+      const field = el.dataset.field;
+      const val = e.target.value;
+      const caret = e.target.selectionStart;
+      const item = state.formLineItems.find((it) => it.id === id);
+      if (item) item[field] = val;
+      render();
+      if (field !== "work" && field !== "unit") {
+        const target = document.querySelector(`[data-li="${id}"][data-field="${field}"]`);
+        if (target) {
+          target.focus();
+          const pos = caret == null ? target.value.length : caret;
+          try { target.setSelectionRange(pos, pos); } catch (err) {}
+        }
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-action="del-line"]').forEach((btn) => {
+    const id = btn.dataset.id;
+    btn.addEventListener("mousedown", () => pressStart(() => { state.confirmDeleteLineId = id; render(); }));
+    btn.addEventListener("touchstart", () => pressStart(() => { state.confirmDeleteLineId = id; render(); }));
+    btn.addEventListener("mouseup", pressEnd);
+    btn.addEventListener("mouseleave", pressEnd);
+    btn.addEventListener("touchend", pressEnd);
+  });
+  document.querySelectorAll('[data-action="confirm-delete-line"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (state.formLineItems.length > 1) {
+        state.formLineItems = state.formLineItems.filter((it) => it.id !== btn.dataset.id);
+      }
+      state.confirmDeleteLineId = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="cancel-delete-line"]').forEach((btn) => {
+    btn.addEventListener("click", () => { state.confirmDeleteLineId = null; render(); });
+  });
+
+  const addLineBtn = document.querySelector('[data-action="add-line"]');
+  if (addLineBtn) addLineBtn.addEventListener("click", () => { state.formLineItems.push(newLineItem()); render(); });
+
+  const saveBtn = document.querySelector('[data-action="save-entry"]');
+  if (saveBtn) saveBtn.addEventListener("click", saveEntry);
+
+  const refreshBtn = document.querySelector('[data-action="refresh"]');
+  if (refreshBtn) refreshBtn.addEventListener("click", async () => { await loadEntries(); render(); });
+
+  const yearSelect = document.getElementById("year-select");
+  if (yearSelect) yearSelect.addEventListener("change", (e) => { state.summaryYear = parseInt(e.target.value, 10); render(); });
+
+  const siteSelect = document.getElementById("site-select");
+  if (siteSelect) siteSelect.addEventListener("change", (e) => { state.summarySite = e.target.value; render(); });
+}
+
+async function saveEntry() {
+  if (!state.formSiteName.trim()) {
+    state.formError = "現場名を入力してください";
+    render();
+    return;
+  }
+  const cleanItems = state.formLineItems.filter((it) => it.qty !== "" || it.price !== "");
+  const entry = {
+    id: uid(),
+    siteName: state.formSiteName.trim(),
+    date: state.formDate,
+    lineItems: cleanItems.length > 0 ? cleanItems : state.formLineItems,
+  };
+  if (API_URL) await loadEntries(true);
+  state.entries.push(entry);
+  await saveEntries();
+  state.formSiteName = "";
+  state.formDate = todayStr();
+  state.formLineItems = [newLineItem()];
+  state.formError = "";
+  state.showForm = false;
+  render();
+}
+
+(async () => {
+  await loadEntries();
+  render();
+})();
+</script>
+</body>
+</html>
