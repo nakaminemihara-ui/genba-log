@@ -1,9 +1,12 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>作業伝票 - 株式会社ナカミネ</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fb923c'/%3E%3Cstop offset='1' stop-color='%23ea580c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Crect x='17' y='12' width='30' height='42' rx='4' fill='white'/%3E%3Crect x='25' y='8' width='14' height='9' rx='2.5' fill='white' stroke='%23ea580c' stroke-width='1.5'/%3E%3Crect x='23' y='24' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='32' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='40' width='13' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fb923c'/%3E%3Cstop offset='1' stop-color='%23ea580c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Crect x='17' y='12' width='30' height='42' rx='4' fill='white'/%3E%3Crect x='25' y='8' width='14' height='9' rx='2.5' fill='white' stroke='%23ea580c' stroke-width='1.5'/%3E%3Crect x='23' y='24' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='32' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='40' width='13' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3C/svg%3E">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -44,13 +47,13 @@
   }
   ul.entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
   .entry-card { background: #fff; border: 1px solid #e7e5e4; border-radius: 10px; overflow: hidden; }
-  .entry-head {
-    display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
-    padding: 10px 14px 8px; border-bottom: 1px solid #f5f5f4;
-  }
+  .entry-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f5f5f4; }
   .entry-head .label { font-size: 11px; color: #a8a29e; margin: 0; }
   .entry-head .site { display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 15px; }
   .entry-head .site .pin { color: #f97316; }
+  .site-sub-entry { border-bottom: 1px solid #f5f5f4; }
+  .site-sub-entry:last-child { border-bottom: none; }
+  .site-sub-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px 2px; }
   .entry-head .right { display: flex; align-items: flex-start; gap: 8px; }
   .entry-head .date { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #a8a29e; margin-top: 14px; }
   .del-btn { background: none; border: none; color: #d6d3d1; cursor: pointer; padding: 4px; user-select: none; }
@@ -138,8 +141,6 @@ const WORK_TYPES = ["はつり", "コア抜き", "雑工"];
 const UNITS = ["本", "式", "人"];
 const STORAGE_KEY = "genba-entries-standalone";
 
-// ここにApps ScriptのウェブアプリURLを貼り付けると、全員で共有できるようになります。
-// 空のままだと、この端末のブラウザだけに保存されます(共有されません)。
 const API_URL = "https://script.google.com/macros/s/AKfycbwGNFhuAqrdDYvmJhRyueWSL3VcShs-7JHr6_XapNXDF1PQSOJTlXgpL2wvyHgh67m-/exec";
 
 function uid() {
@@ -163,6 +164,7 @@ let state = {
   summarySite: "",
   confirmDeleteId: null,
   confirmDeleteLineId: null,
+  deletingId: null,
   formSiteName: "",
   formDate: todayStr(),
   formLineItems: [newLineItem()],
@@ -198,18 +200,26 @@ async function saveEntries() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
     } catch (e) {
       console.error("保存に失敗しました", e);
+      return false;
     }
-    return;
+    return true;
   }
   state.syncing = true; render();
-  try {
-    await fetch(API_URL, { method: "POST", body: JSON.stringify(state.entries) });
-    state.syncError = false;
-  } catch (e) {
-    console.error("保存に失敗しました", e);
-    state.syncError = true;
+  let ok = false;
+  for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+    try {
+      const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(state.entries) });
+      const data = await res.json().catch(() => null);
+      ok = !data || data.ok !== false;
+    } catch (e) {
+      console.error("保存に失敗しました", e);
+      ok = false;
+    }
+    if (!ok && attempt === 0) await new Promise((r) => setTimeout(r, 700));
   }
+  state.syncError = !ok;
   state.syncing = false;
+  return ok;
 }
 
 function fmtYen(n) {
@@ -339,48 +349,62 @@ function renderEntryList() {
     return `<div class="empty">${state.entries.length === 0 ? "まだ記録がありません" : "該当する記録がありません"}</div>`;
   }
 
-  return `<ul class="entries">` + filtered.map((e) => `
+  const bySite = {};
+  filtered.forEach((e) => {
+    if (!bySite[e.siteName]) bySite[e.siteName] = [];
+    bySite[e.siteName].push(e);
+  });
+
+  return `<ul class="entries">` + Object.keys(bySite).map((site) => `
     <li class="entry-card">
       <div class="entry-head">
         <div>
           <p class="label">現場名</p>
-          <div class="site"><span class="pin">📍</span><span>${esc(e.siteName)}</span></div>
-        </div>
-        <div class="right">
-          ${state.confirmDeleteId === e.id ? `
-            <div class="confirm-box">
-              <span class="txt">削除しますか</span>
-              <button class="yes" data-action="confirm-delete-entry" data-id="${e.id}">はい</button>
-              <button class="no" data-action="cancel-delete-entry">いいえ</button>
-            </div>
-          ` : `
-            <div class="date">📅 ${esc(e.date)}</div>
-            <button class="del-btn" data-action="del-entry" data-id="${e.id}" aria-label="長押しで削除">🗑</button>
-          `}
+          <div class="site"><span class="pin">📍</span><span>${esc(site)}</span></div>
         </div>
       </div>
-      ${(e.lineItems || []).length > 0 ? `
-        <div class="entry-body">
-          <table class="detail">
-            <thead><tr><th>作業内容</th><th>サイズ</th><th class="r">数量</th><th>単位</th><th class="r">金額</th></tr></thead>
-            <tbody>
-              ${e.lineItems.map((it) => `
-                <tr>
-                  <td>${esc(it.work)}${(it.location || it.note) ? `<div style="font-size:11px;color:#a8a29e;font-weight:400;margin-top:2px;">${it.location ? `<div>📍${esc(it.location)}</div>` : ""}${it.note ? `<div>備考: ${esc(it.note)}</div>` : ""}</div>` : ""}</td>
-                  <td>${esc(sizeLabel(it) || "-")}</td>
-                  <td class="r">${esc(it.qty || "-")}</td>
-                  <td>${esc(it.unit)}</td>
-                  <td class="r">${it.price ? esc(fmtYen(lineTotal(it))) : "-"}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-          <div class="entry-total">
-            <span class="lbl">合計</span>
-            <span class="val">${esc(fmtYen(entryTotal(e.lineItems)))}</span>
+      ${bySite[site].map((e) => `
+        <div class="site-sub-entry">
+          <div class="site-sub-head">
+            ${state.deletingId === e.id ? `
+              <div class="confirm-box" style="margin-left:auto;">
+                <span class="txt">削除中…</span>
+              </div>
+            ` : state.confirmDeleteId === e.id ? `
+              <div class="confirm-box" style="margin-left:auto;">
+                <span class="txt">削除しますか</span>
+                <button class="yes" data-action="confirm-delete-entry" data-id="${e.id}">はい</button>
+                <button class="no" data-action="cancel-delete-entry">いいえ</button>
+              </div>
+            ` : `
+              <div class="date">📅 ${esc(e.date)}</div>
+              <button class="del-btn" data-action="del-entry" data-id="${e.id}" aria-label="長押しで削除">🗑</button>
+            `}
           </div>
+          ${(e.lineItems || []).length > 0 ? `
+            <div class="entry-body">
+              <table class="detail">
+                <thead><tr><th>作業内容</th><th>サイズ</th><th class="r">数量</th><th>単位</th><th class="r">金額</th></tr></thead>
+                <tbody>
+                  ${e.lineItems.map((it) => `
+                    <tr>
+                      <td>${esc(it.work)}${(it.location || it.note) ? `<div style="font-size:11px;color:#a8a29e;font-weight:400;margin-top:2px;">${it.location ? `<div>📍${esc(it.location)}</div>` : ""}${it.note ? `<div>備考: ${esc(it.note)}</div>` : ""}</div>` : ""}</td>
+                      <td>${esc(sizeLabel(it) || "-")}</td>
+                      <td class="r">${esc(it.qty || "-")}</td>
+                      <td>${esc(it.unit)}</td>
+                      <td class="r">${it.price ? esc(fmtYen(lineTotal(it))) : "-"}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+              <div class="entry-total">
+                <span class="lbl">合計</span>
+                <span class="val">${esc(fmtYen(entryTotal(e.lineItems)))}</span>
+              </div>
+            </div>
+          ` : ""}
         </div>
-      ` : ""}
+      `).join("")}
     </li>
   `).join("") + `</ul>`;
 }
@@ -416,7 +440,7 @@ function renderForm() {
       <button class="add-line-btn" data-action="add-line">+ 行を追加</button>
       <div class="grand-total">
         <span class="lbl">合計金額</span>
-        <span class="val">${esc(fmtYen(entryTotal(li)))}</span>
+        <span class="val" id="grand-total-val">${esc(fmtYen(entryTotal(li)))}</span>
       </div>
       <button class="btn-primary" data-action="save-entry" style="margin-bottom:0;">保存する</button>
     </div>
@@ -429,19 +453,19 @@ function renderLineItem(it) {
     sizeBlock = `
       <div class="size-row">
         <span class="sep">Φ</span>
-        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="diameter" value="${esc(it.diameter)}" />
+        <input type="text" inputmode="decimal" data-li="${it.id}" data-field="diameter" value="${esc(it.diameter)}" />
         <span class="sep">×</span>
-        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="length" value="${esc(it.length)}" />
+        <input type="text" inputmode="decimal" data-li="${it.id}" data-field="length" value="${esc(it.length)}" />
         <span class="unit">mm</span>
       </div>`;
   } else if (it.work === "はつり") {
     sizeBlock = `
       <div class="size-row">
-        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="width" placeholder="幅" value="${esc(it.width)}" />
+        <input type="text" inputmode="decimal" data-li="${it.id}" data-field="width" placeholder="幅" value="${esc(it.width)}" />
         <span class="sep">×</span>
-        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="haturiLength" placeholder="長さ" value="${esc(it.haturiLength)}" />
+        <input type="text" inputmode="decimal" data-li="${it.id}" data-field="haturiLength" placeholder="長さ" value="${esc(it.haturiLength)}" />
         <span class="sep">×</span>
-        <input type="number" inputmode="decimal" data-li="${it.id}" data-field="depth" placeholder="深さ" value="${esc(it.depth)}" />
+        <input type="text" inputmode="decimal" data-li="${it.id}" data-field="depth" placeholder="深さ" value="${esc(it.depth)}" />
         <span class="unit">mm</span>
       </div>`;
   }
@@ -473,7 +497,7 @@ function renderLineItem(it) {
           <input type="text" inputmode="decimal" data-li="${it.id}" data-field="price" placeholder="単価" value="${esc(it.price)}" />
         </div>
       </div>
-      ${it.price ? `<p class="li-subtotal">小計 ${esc(fmtYen(lineTotal(it)))}</p>` : ""}
+      <p class="li-subtotal" id="li-subtotal-${it.id}">${it.price ? `小計 ${esc(fmtYen(lineTotal(it)))}` : ""}</p>
       <div style="margin-top:8px;">
         <input type="text" data-li="${it.id}" data-field="location" placeholder="作業場所(例: 1F 駐車場)" value="${esc(it.location)}" style="background:#fff;margin-bottom:6px;" />
         <textarea data-li="${it.id}" data-field="note" placeholder="備考" rows="2" style="background:#fff;resize:none;">${esc(it.note)}</textarea>
@@ -608,7 +632,6 @@ function bindEvents() {
     searchInput.addEventListener("input", (e) => { state.query = e.target.value; render(); searchInput.focus(); searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length); });
   }
 
-  // entry delete (long press)
   document.querySelectorAll('[data-action="del-entry"]').forEach((btn) => {
     const id = btn.dataset.id;
     btn.addEventListener("mousedown", () => pressStart(() => { state.confirmDeleteId = id; render(); }));
@@ -620,10 +643,30 @@ function bindEvents() {
   document.querySelectorAll('[data-action="confirm-delete-entry"]').forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
-      if (API_URL) await loadEntries(true);
-      state.entries = state.entries.filter((e) => e.id !== id);
+      state.deletingId = id;
       state.confirmDeleteId = null;
-      await saveEntries();
+      render();
+      let success = false;
+      for (let attempt = 0; attempt < 2 && !success; attempt++) {
+        if (API_URL) await loadEntries(true);
+        const stillThere = state.entries.some((e) => e.id === id);
+        if (!stillThere) { success = true; break; }
+        const before = state.entries;
+        state.entries = state.entries.filter((e) => e.id !== id);
+        const saved = await saveEntries();
+        if (saved && API_URL) {
+          await loadEntries(true);
+          success = !state.entries.some((e) => e.id === id);
+        } else if (saved) {
+          success = true;
+        } else {
+          state.entries = before;
+        }
+      }
+      state.deletingId = null;
+      if (!success) {
+        alert("削除に失敗しました。通信状況を確認してもう一度お試しください。");
+      }
       render();
     });
   });
@@ -631,7 +674,6 @@ function bindEvents() {
     btn.addEventListener("click", () => { state.confirmDeleteId = null; render(); });
   });
 
-  // form fields
   const siteNameInput = document.getElementById("site-name-input");
   if (siteNameInput) {
     siteNameInput.addEventListener("input", (e) => {
@@ -642,23 +684,25 @@ function bindEvents() {
   const dateInput = document.getElementById("date-input");
   if (dateInput) dateInput.addEventListener("input", (e) => { state.formDate = e.target.value; });
 
-  // line item fields
   document.querySelectorAll('[data-li]').forEach((el) => {
-    el.addEventListener(el.tagName === "SELECT" ? "change" : "input", (e) => {
+    const eventName = el.tagName === "SELECT" ? "change" : "input";
+    el.addEventListener(eventName, (e) => {
       const id = el.dataset.li;
       const field = el.dataset.field;
       const val = e.target.value;
-      const caret = e.target.selectionStart;
       const item = state.formLineItems.find((it) => it.id === id);
       if (item) item[field] = val;
-      render();
-      if (field !== "work" && field !== "unit") {
-        const target = document.querySelector(`[data-li="${id}"][data-field="${field}"]`);
-        if (target) {
-          target.focus();
-          const pos = caret == null ? target.value.length : caret;
-          try { target.setSelectionRange(pos, pos); } catch (err) {}
-        }
+
+      if (field === "work") {
+        render();
+        return;
+      }
+      if (field === "qty" || field === "price") {
+        const subEl = document.getElementById(`li-subtotal-${id}`);
+        if (subEl) subEl.textContent = item && item.price ? `小計 ${fmtYen(lineTotal(item))}` : "";
+        const grandEl = document.getElementById("grand-total-val");
+        if (grandEl) grandEl.textContent = fmtYen(entryTotal(state.formLineItems));
+        return;
       }
     });
   });
@@ -715,7 +759,13 @@ async function saveEntry() {
   };
   if (API_URL) await loadEntries(true);
   state.entries.push(entry);
-  await saveEntries();
+  const ok = await saveEntries();
+  if (!ok) {
+    alert("保存に失敗しました。通信状況を確認してもう一度お試しください。");
+    state.entries = state.entries.filter((e) => e.id !== entry.id);
+    render();
+    return;
+  }
   state.formSiteName = "";
   state.formDate = todayStr();
   state.formLineItems = [newLineItem()];
@@ -731,3 +781,5 @@ async function saveEntry() {
 </script>
 </body>
 </html>
+
+
