@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -164,11 +163,13 @@ let state = {
   query: "",
   summaryYear: new Date().getFullYear(),
   summarySite: "",
+  summaryClient: "",
   confirmDeleteId: null,
   confirmDeleteLineId: null,
   deletingId: null,
   editingEntryId: null,
   formSiteName: "",
+  formClientCompany: "",
   formDate: todayStr(),
   formLineItems: [newLineItem()],
   formError: "",
@@ -263,24 +264,33 @@ function pressEnd() {
   if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
 }
 
-function buildSummary(year) {
-  const sitesAll = Array.from(new Set(state.entries.map((e) => e.siteName))).sort();
-  const siteMonth = {};
+function buildGroupedSummary(year, keyFn) {
+  const groupMonth = {};
   const monthTotal = Array(12).fill(0);
-  sitesAll.forEach((s) => { siteMonth[s] = Array(12).fill(0); });
   state.entries.forEach((e) => {
     const y = parseInt(e.date.slice(0, 4), 10);
     const m = parseInt(e.date.slice(5, 7), 10) - 1;
     if (y !== year) return;
+    const key = keyFn(e) || "(未設定)";
     const amount = entryTotal(e.lineItems || []);
-    if (!siteMonth[e.siteName]) siteMonth[e.siteName] = Array(12).fill(0);
-    siteMonth[e.siteName][m] += amount;
+    if (!groupMonth[key]) groupMonth[key] = Array(12).fill(0);
+    groupMonth[key][m] += amount;
     monthTotal[m] += amount;
   });
-  const siteYearTotal = {};
-  Object.keys(siteMonth).forEach((s) => { siteYearTotal[s] = siteMonth[s].reduce((a, b) => a + b, 0); });
+  const groupYearTotal = {};
+  Object.keys(groupMonth).forEach((k) => { groupYearTotal[k] = groupMonth[k].reduce((a, b) => a + b, 0); });
   const grandTotal = monthTotal.reduce((a, b) => a + b, 0);
-  return { siteMonth, monthTotal, siteYearTotal, grandTotal, sitesAll };
+  return { groupMonth, monthTotal, groupYearTotal, grandTotal };
+}
+
+function buildSummary(year) {
+  const r = buildGroupedSummary(year, (e) => e.siteName);
+  return { siteMonth: r.groupMonth, monthTotal: r.monthTotal, siteYearTotal: r.groupYearTotal, grandTotal: r.grandTotal };
+}
+
+function buildClientSummary(year) {
+  const r = buildGroupedSummary(year, (e) => e.clientCompany);
+  return { clientMonth: r.groupMonth, monthTotal: r.monthTotal, clientYearTotal: r.groupYearTotal, grandTotal: r.grandTotal };
 }
 
 function render() {
@@ -387,6 +397,7 @@ function renderEntryList() {
               </div>
             `}
           </div>
+          ${e.clientCompany ? `<div style="padding:0 14px 6px;font-size:11px;color:#a8a29e;">発注: ${esc(e.clientCompany)}</div>` : ""}
           ${(e.lineItems || []).length > 0 ? `
             <div class="entry-body">
               <table class="detail">
@@ -435,6 +446,12 @@ function renderForm() {
         <div class="fixed">
           <label class="sm">日付</label>
           <input type="date" id="date-input" value="${esc(state.formDate)}" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div class="grow">
+          <label class="sm">発注会社</label>
+          <input type="text" id="client-company-input" placeholder="例: 〇〇建設" value="${esc(state.formClientCompany)}" />
         </div>
       </div>
       ${state.formError ? `<p class="error">${esc(state.formError)}</p>` : ""}
@@ -515,6 +532,8 @@ function renderLineItem(it) {
 function renderSummaryTab() {
   const summary = buildSummary(state.summaryYear);
   const summarySites = Object.keys(summary.siteMonth).sort();
+  const clientSummary = buildClientSummary(state.summaryYear);
+  const summaryClients = Object.keys(clientSummary.clientMonth).sort();
   const monthLabels = ["1","2","3","4","5","6","7","8","9","10","11","12"];
   const years = Array.from(new Set([state.summaryYear, ...state.entries.map((e) => parseInt(e.date.slice(0, 4), 10))])).sort((a, b) => b - a);
 
@@ -549,6 +568,40 @@ function renderSummaryTab() {
         </table>
       </div>
       <p class="note">各セルは月別の現場ごとの合計金額です。右端が現場の年間合計、一番下の行が月ごとの全現場合計、右下が${state.summaryYear}年の全体合計です。</p>
+    `;
+  }
+
+  let clientMatrixHtml;
+  if (summaryClients.length === 0) {
+    clientMatrixHtml = `<div class="empty">この年の記録がありません</div>`;
+  } else {
+    clientMatrixHtml = `
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th class="site-col">発注会社</th>
+              ${monthLabels.map((m) => `<th>${m}月</th>`).join("")}
+              <th>年間合計</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${summaryClients.map((c) => `
+              <tr class="data">
+                <td class="site-col">${esc(c)}</td>
+                ${clientSummary.clientMonth[c].map((v) => `<td>${v ? esc(fmtYen(v)) : "-"}</td>`).join("")}
+                <td style="font-weight:600;color:#1c1917;">${esc(fmtYen(clientSummary.clientYearTotal[c]))}</td>
+              </tr>
+            `).join("")}
+            <tr class="total">
+              <td class="site-col">全発注会社合計</td>
+              ${clientSummary.monthTotal.map((v) => `<td>${v ? esc(fmtYen(v)) : "-"}</td>`).join("")}
+              <td class="grand">${esc(fmtYen(clientSummary.grandTotal))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">発注会社が未入力の記録は「(未設定)」としてまとめています。</p>
     `;
   }
 
@@ -600,6 +653,54 @@ function renderSummaryTab() {
     }
   }
 
+  const clientsAvailable = Array.from(new Set(state.entries.map((e) => e.clientCompany).filter(Boolean))).sort();
+  let clientDetailHtml;
+  if (!state.summaryClient) {
+    clientDetailHtml = `<div class="empty">発注会社を選択すると月ごとの内容が表示されます</div>`;
+  } else {
+    const clientEntries = state.entries
+      .filter((e) => e.clientCompany === state.summaryClient && parseInt(e.date.slice(0, 4), 10) === state.summaryYear)
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    const byMonth = {};
+    clientEntries.forEach((e) => {
+      const m = parseInt(e.date.slice(5, 7), 10);
+      if (!byMonth[m]) byMonth[m] = [];
+      byMonth[m].push(e);
+    });
+    const months = Object.keys(byMonth).map((m) => parseInt(m, 10)).sort((a, b) => a - b);
+    if (months.length === 0) {
+      clientDetailHtml = `<div class="empty">${state.summaryYear}年の${esc(state.summaryClient)}の記録はありません</div>`;
+    } else {
+      clientDetailHtml = months.map((m) => `
+        <div class="detail-month">
+          <div class="mh">
+            <span class="m">${m}月</span>
+            <span class="t">${esc(fmtYen(byMonth[m].reduce((sum, e) => sum + entryTotal(e.lineItems || []), 0)))}</span>
+          </div>
+          ${byMonth[m].map((e) => `
+            <div class="site-detail-entry">
+              <div class="sde-head">
+                <span>📅 ${esc(e.date)} ・ 📍${esc(e.siteName)}</span>
+                <span class="amt">${esc(fmtYen(entryTotal(e.lineItems || [])))}</span>
+              </div>
+              <table class="detail" style="padding:0 12px;">
+                <tbody>
+                  ${(e.lineItems || []).map((it) => `
+                    <tr>
+                      <td style="padding-left:12px;">${esc(it.work)}${sizeLabel(it) ? `<span style="color:#a8a29e;font-size:11px;margin-left:4px;">${esc(sizeLabel(it))}${it.work === "はつり" ? "mm" : ""}</span>` : ""}</td>
+                      <td class="r">${esc(it.qty || "-")}${esc(it.unit)}</td>
+                      <td class="r" style="padding-right:12px;">${it.price ? esc(fmtYen(lineTotal(it))) : "-"}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          `).join("")}
+        </div>
+      `).join("");
+    }
+  }
+
   return `
     <div class="card summary-card">
       <div class="summary-head">
@@ -618,6 +719,20 @@ function renderSummaryTab() {
         </select>
       </div>
       ${detailHtml}
+      <div class="divider"></div>
+      <div class="summary-head">
+        <span class="title">年間・発注会社別集計</span>
+      </div>
+      ${clientMatrixHtml}
+      <div class="divider"></div>
+      <div class="summary-head">
+        <span class="title">発注会社別・月別の内容一覧</span>
+        <select id="client-select">
+          <option value="">発注会社を選択</option>
+          ${clientsAvailable.map((c) => `<option value="${c}" ${c === state.summaryClient ? "selected" : ""}>${esc(c)}</option>`).join("")}
+        </select>
+      </div>
+      ${clientDetailHtml}
     </div>
   `;
 }
@@ -631,6 +746,7 @@ function bindEvents() {
   if (openBtn) openBtn.addEventListener("click", () => {
     state.editingEntryId = null;
     state.formSiteName = "";
+    state.formClientCompany = "";
     state.formDate = todayStr();
     state.formLineItems = [newLineItem()];
     state.formError = "";
@@ -653,6 +769,7 @@ function bindEvents() {
       if (!entry) return;
       state.editingEntryId = id;
       state.formSiteName = entry.siteName;
+      state.formClientCompany = entry.clientCompany || "";
       state.formDate = entry.date;
       state.formLineItems = (entry.lineItems && entry.lineItems.length > 0
         ? entry.lineItems.map((it) => Object.assign({}, newLineItem(), it, { id: it.id || uid() }))
@@ -719,6 +836,10 @@ function bindEvents() {
       if (state.formError) state.formError = "";
     });
   }
+  const clientCompanyInput = document.getElementById("client-company-input");
+  if (clientCompanyInput) {
+    clientCompanyInput.addEventListener("input", (e) => { state.formClientCompany = e.target.value; });
+  }
   const dateInput = document.getElementById("date-input");
   if (dateInput) dateInput.addEventListener("input", (e) => { state.formDate = e.target.value; });
 
@@ -783,6 +904,9 @@ function bindEvents() {
 
   const siteSelect = document.getElementById("site-select");
   if (siteSelect) siteSelect.addEventListener("change", (e) => { state.summarySite = e.target.value; render(); });
+
+  const clientSelect = document.getElementById("client-select");
+  if (clientSelect) clientSelect.addEventListener("change", (e) => { state.summaryClient = e.target.value; render(); });
 }
 
 async function saveEntry() {
@@ -810,6 +934,7 @@ async function saveEntry() {
     state.entries[idx] = {
       id: editingId,
       siteName: state.formSiteName.trim(),
+      clientCompany: state.formClientCompany.trim(),
       date: state.formDate,
       lineItems: cleanItems.length > 0 ? cleanItems : state.formLineItems,
     };
@@ -824,6 +949,7 @@ async function saveEntry() {
     const entry = {
       id: uid(),
       siteName: state.formSiteName.trim(),
+      clientCompany: state.formClientCompany.trim(),
       date: state.formDate,
       lineItems: cleanItems.length > 0 ? cleanItems : state.formLineItems,
     };
@@ -838,11 +964,13 @@ async function saveEntry() {
   }
 
   state.formSiteName = "";
+  state.formClientCompany = "";
   state.formDate = todayStr();
   state.formLineItems = [newLineItem()];
   state.formError = "";
   state.editingEntryId = null;
   state.showForm = false;
+  state.query = "";
   render();
 }
 
@@ -853,9 +981,3 @@ async function saveEntry() {
 </script>
 </body>
 </html>
-
-
-
-
-
-
