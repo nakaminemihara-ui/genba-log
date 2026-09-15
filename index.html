@@ -1,4 +1,51 @@
 
+2026-09-14.png
+セレクト幅を固定しテーブルレイアウトの修正方法を検討しています。
+写真で状況が分かりました。「作業内容」のプルダウンが極端に狭くなっていて、文字が「E」だけしか見えていませんね(実際は「はつり」等の文字が入っているはずが表示しきれていません)。直します。
+
+4個のコマンドを実行しました, ファイルを編集しました
+前回作った日報アプリなんだが保存確定してからも修整できるようにして欲しい
+
+12個のコマンドを実行しました, 2個のファイルを編集しました、他7個のツール
+日報アプリ(genba-log.html)に編集機能を追加しました。社長用・従業員用の両方に入っています。
+
+各記録の右上に「🗑」(削除)と並んで「✏️」(編集)ボタンが出るようになりました
+✏️を押すと、その記録の内容(現場名・日付・作業内容など)がフォームに読み込まれ、そのまま修正できます
+修正後は「更新する」ボタンで上書き保存されます(新規記録として増えることはありません)
+同じスプレッドシートに保存されるので、他の人にもすぐ反映されます
+あと、さっきの見積書アプリの「作業内容」プルダウンが狭すぎる件も、列の幅の決め方を変えて直しておきました。あわせてお使いください。
+
+
+Genba log
+コード·HTML 
+
+Genba log employee
+コード·HTML 
+
+Mitsumori
+コード·HTML 
+これ新たにまた全員に送らんとだめかい
+
+Weighing whether employees use hosted links or local files.
+使っている方法によって変わります。
+
+GitHubのリンク(https://nakaminemihara-ui.github.io/genba-log/)をブックマークやホーム画面から開いている場合 → 私が今から index.html を新しい内容に差し替えれば、それで全員に自動的に反映されます。ファイルを配り直す必要はありません。
+ファイルをダウンロードして手元に保存したものを直接開いている場合 → その端末には自動で反映されないので、新しいファイルを配り直す必要があります。
+今、社長さんと従業員さんはどちらの方法で開いていますか?もしみんなGitHubのリンクを使っているなら、私がGitHub側を更新するだけで済みます。
+
+ギットハブ更新して
+
+Updating a GitHub Pages page with new edit features.
+Updating a GitHub Pages page with new edit features.
+GitHubへの直接アップロードはこちらからはできないので、前回と同じ手順で更新をお願いします(もう慣れてると思うので手短に)。
+
+パソコンで https://github.com/nakaminemihara-ui/genba-log を開く
+index.html をクリック→右上の鉛筆マーク(編集)
+中身を全選択(Ctrl+A)して削除
+下のコードを全部コピーして貼り付け
+下にスクロールして緑の「Commit changes」
+2個のコマンドを実行しました
+html
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -141,6 +188,8 @@ const WORK_TYPES = ["はつり", "コア抜き", "雑工"];
 const UNITS = ["本", "式", "人"];
 const STORAGE_KEY = "genba-entries-standalone";
 
+// ここにApps ScriptのウェブアプリURLを貼り付けると、全員で共有できるようになります。
+// 空のままだと、この端末のブラウザだけに保存されます(共有されません)。
 const API_URL = "https://script.google.com/macros/s/AKfycbwGNFhuAqrdDYvmJhRyueWSL3VcShs-7JHr6_XapNXDF1PQSOJTlXgpL2wvyHgh67m-/exec";
 
 function uid() {
@@ -165,6 +214,7 @@ let state = {
   confirmDeleteId: null,
   confirmDeleteLineId: null,
   deletingId: null,
+  editingEntryId: null,
   formSiteName: "",
   formDate: todayStr(),
   formLineItems: [newLineItem()],
@@ -378,7 +428,10 @@ function renderEntryList() {
               </div>
             ` : `
               <div class="date">📅 ${esc(e.date)}</div>
-              <button class="del-btn" data-action="del-entry" data-id="${e.id}" aria-label="長押しで削除">🗑</button>
+              <div style="display:flex;gap:4px;">
+                <button class="del-btn" data-action="edit-entry" data-id="${e.id}" aria-label="編集">✏️</button>
+                <button class="del-btn" data-action="del-entry" data-id="${e.id}" aria-label="長押しで削除">🗑</button>
+              </div>
             `}
           </div>
           ${(e.lineItems || []).length > 0 ? `
@@ -416,7 +469,7 @@ function renderForm() {
       <div class="form-head">
         <div>
           <p class="company">株式会社ナカミネ</p>
-          <h2>作業伝票 新規記録</h2>
+          <h2>作業伝票 ${state.editingEntryId ? "編集" : "新規記録"}</h2>
         </div>
         <button class="close" data-action="close-form">✕</button>
       </div>
@@ -442,7 +495,7 @@ function renderForm() {
         <span class="lbl">合計金額</span>
         <span class="val" id="grand-total-val">${esc(fmtYen(entryTotal(li)))}</span>
       </div>
-      <button class="btn-primary" data-action="save-entry" style="margin-bottom:0;">保存する</button>
+      <button class="btn-primary" data-action="save-entry" style="margin-bottom:0;">${state.editingEntryId ? "更新する" : "保存する"}</button>
     </div>
   `;
 }
@@ -622,16 +675,47 @@ function bindEvents() {
   });
 
   const openBtn = document.querySelector('[data-action="open-form"]');
-  if (openBtn) openBtn.addEventListener("click", () => { state.showForm = true; render(); });
+  if (openBtn) openBtn.addEventListener("click", () => {
+    state.editingEntryId = null;
+    state.formSiteName = "";
+    state.formDate = todayStr();
+    state.formLineItems = [newLineItem()];
+    state.formError = "";
+    state.showForm = true;
+    render();
+  });
 
   const closeBtn = document.querySelector('[data-action="close-form"]');
-  if (closeBtn) closeBtn.addEventListener("click", () => { state.showForm = false; state.formError = ""; render(); });
+  if (closeBtn) closeBtn.addEventListener("click", () => {
+    state.showForm = false;
+    state.editingEntryId = null;
+    state.formError = "";
+    render();
+  });
+
+  document.querySelectorAll('[data-action="edit-entry"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.id;
+      const entry = state.entries.find((e) => e.id === id);
+      if (!entry) return;
+      state.editingEntryId = id;
+      state.formSiteName = entry.siteName;
+      state.formDate = entry.date;
+      state.formLineItems = (entry.lineItems && entry.lineItems.length > 0
+        ? entry.lineItems.map((it) => Object.assign({}, newLineItem(), it, { id: it.id || uid() }))
+        : [newLineItem()]);
+      state.formError = "";
+      state.showForm = true;
+      render();
+    });
+  });
 
   const searchInput = document.getElementById("search-input");
   if (searchInput) {
     searchInput.addEventListener("input", (e) => { state.query = e.target.value; render(); searchInput.focus(); searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length); });
   }
 
+  // entry delete (long press)
   document.querySelectorAll('[data-action="del-entry"]').forEach((btn) => {
     const id = btn.dataset.id;
     btn.addEventListener("mousedown", () => pressStart(() => { state.confirmDeleteId = id; render(); }));
@@ -674,6 +758,7 @@ function bindEvents() {
     btn.addEventListener("click", () => { state.confirmDeleteId = null; render(); });
   });
 
+  // form fields
   const siteNameInput = document.getElementById("site-name-input");
   if (siteNameInput) {
     siteNameInput.addEventListener("input", (e) => {
@@ -684,6 +769,7 @@ function bindEvents() {
   const dateInput = document.getElementById("date-input");
   if (dateInput) dateInput.addEventListener("input", (e) => { state.formDate = e.target.value; });
 
+  // line item fields
   document.querySelectorAll('[data-li]').forEach((el) => {
     const eventName = el.tagName === "SELECT" ? "change" : "input";
     el.addEventListener(eventName, (e) => {
@@ -704,6 +790,8 @@ function bindEvents() {
         if (grandEl) grandEl.textContent = fmtYen(entryTotal(state.formLineItems));
         return;
       }
+      // unit / diameter / length / width / haturiLength / depth / location / note:
+      // no full re-render needed, state is already updated above.
     });
   });
 
@@ -751,25 +839,56 @@ async function saveEntry() {
     return;
   }
   const cleanItems = state.formLineItems.filter((it) => it.qty !== "" || it.price !== "");
-  const entry = {
-    id: uid(),
-    siteName: state.formSiteName.trim(),
-    date: state.formDate,
-    lineItems: cleanItems.length > 0 ? cleanItems : state.formLineItems,
-  };
+  const editingId = state.editingEntryId;
+
   if (API_URL) await loadEntries(true);
-  state.entries.push(entry);
-  const ok = await saveEntries();
-  if (!ok) {
-    alert("保存に失敗しました。通信状況を確認してもう一度お試しください。");
-    state.entries = state.entries.filter((e) => e.id !== entry.id);
-    render();
-    return;
+
+  let ok;
+  if (editingId) {
+    const idx = state.entries.findIndex((e) => e.id === editingId);
+    if (idx === -1) {
+      alert("この記録は既に削除されているため、更新できませんでした。");
+      state.editingEntryId = null;
+      state.showForm = false;
+      render();
+      return;
+    }
+    const before = state.entries[idx];
+    state.entries[idx] = {
+      id: editingId,
+      siteName: state.formSiteName.trim(),
+      date: state.formDate,
+      lineItems: cleanItems.length > 0 ? cleanItems : state.formLineItems,
+    };
+    ok = await saveEntries();
+    if (!ok) {
+      state.entries[idx] = before;
+      alert("更新に失敗しました。通信状況を確認してもう一度お試しください。");
+      render();
+      return;
+    }
+  } else {
+    const entry = {
+      id: uid(),
+      siteName: state.formSiteName.trim(),
+      date: state.formDate,
+      lineItems: cleanItems.length > 0 ? cleanItems : state.formLineItems,
+    };
+    state.entries.push(entry);
+    ok = await saveEntries();
+    if (!ok) {
+      alert("保存に失敗しました。通信状況を確認してもう一度お試しください。");
+      state.entries = state.entries.filter((e) => e.id !== entry.id);
+      render();
+      return;
+    }
   }
+
   state.formSiteName = "";
   state.formDate = todayStr();
   state.formLineItems = [newLineItem()];
   state.formError = "";
+  state.editingEntryId = null;
   state.showForm = false;
   render();
 }
@@ -781,5 +900,9 @@ async function saveEntry() {
 </script>
 </body>
 </html>
+
+
+
+
 
 
