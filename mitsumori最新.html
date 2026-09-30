@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>見積書・請求書作成 - 株式会社ナカミネ</title>
+<meta name="theme-color" content="#f97316">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="見積・請求書">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fb923c'/%3E%3Cstop offset='1' stop-color='%23ea580c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Crect x='17' y='12' width='30' height='42' rx='4' fill='white'/%3E%3Crect x='25' y='8' width='14' height='9' rx='2.5' fill='white' stroke='%23ea580c' stroke-width='1.5'/%3E%3Crect x='23' y='24' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='32' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='40' width='13' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fb923c'/%3E%3Cstop offset='1' stop-color='%23ea580c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Crect x='17' y='12' width='30' height='42' rx='4' fill='white'/%3E%3Crect x='25' y='8' width='14' height='9' rx='2.5' fill='white' stroke='%23ea580c' stroke-width='1.5'/%3E%3Crect x='23' y='24' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='32' width='20' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3Crect x='23' y='40' width='13' height='3.5' rx='1.75' fill='%23fb923c'/%3E%3C/svg%3E">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    background: #fafaf9;
+    color: #1c1917;
+  }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 20px 16px 60px; }
+  .card { background: #fff; border: 1px solid #e7e5e4; border-radius: 10px; }
+  header.card { padding: 12px 16px; margin-bottom: 16px; }
+  header .company { font-size: 12px; color: #a8a29e; }
+  header h1 { font-size: 20px; font-weight: 700; margin: 2px 0 0; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button {
+    flex: 1; padding: 8px; font-size: 14px; font-weight: 700; border-radius: 8px;
+    border: 1px solid #e7e5e4; background: #fff; color: #57534e; cursor: pointer;
+  }
+  .tabs button.active { background: #1c1917; color: #fff; border-color: #1c1917; }
+  input, select, textarea {
+    font-family: inherit; font-size: 13px; border: 1px solid #e7e5e4; border-radius: 6px;
+    padding: 6px 8px; background: #fafaf9; outline: none; width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #fb923c; box-shadow: 0 0 0 1px #fb923c; }
+  input:disabled { color: #a8a29e; background: #f5f5f4; }
+  label.sm { display: block; font-size: 10px; color: #78716c; margin-bottom: 3px; }
+  .doc-card { padding: 22px; margin-bottom: 16px; }
+
+  .doc-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+  .doc-title { font-size: 26px; font-weight: 700; letter-spacing: 6px; margin: 0; }
+  .doc-meta { text-align: right; font-size: 12px; color: #57534e; }
+  .doc-meta input { text-align: right; margin-bottom: 4px; }
+  .doc-meta .row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-bottom: 4px; }
+  .doc-meta .row label { font-size: 11px; color: #78716c; white-space: nowrap; }
+  .doc-meta .row input { width: 130px; }
+  .doc-meta .row input#regno-input { width: 170px; font-size: 11px; }
+
+  .total-box {
+    border: 2px solid #1c1917; border-radius: 8px; padding: 10px 16px; display: flex;
+    align-items: center; justify-content: space-between; margin: 10px 0 14px;
+  }
+  .total-box .lbl { font-size: 13px; font-weight: 700; }
+  .total-box .val { font-size: 24px; font-weight: 700; }
+
+  .greeting { font-size: 13px; margin: 0 0 14px; }
+
+  .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 14px; }
+  .party-block { border-bottom: 1px solid #e7e5e4; padding-bottom: 10px; }
+  .party-block .name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .party-block .name-row input.company-name { font-size: 15px; font-weight: 700; min-width: 0; }
+  #issuer-name-input { font-size: 12.5px; }
+  .party-block .name-row select.honorific { width: 70px; flex-shrink: 0; }
+  .party-block .sub-row { display: flex; gap: 6px; margin-bottom: 4px; }
+  .party-block .sub-row input.postal { width: 110px; flex-shrink: 0; }
+  .party-block .sub-row2 { display: flex; gap: 6px; }
+  .party-block .sub-row2 input { font-size: 11px; }
+
+  .site-row { margin-bottom: 14px; }
+  .site-row label.sm { font-size: 11px; }
+  .site-row input { font-size: 14px; font-weight: 600; }
+
+  table.items { width: 100%; min-width: 820px; border-collapse: collapse; margin-bottom: 4px; font-size: 14px; }
+  .items-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 4px; }
+  table.items thead th {
+    background: #f5f5f4; border: 1px solid #d6d3d1; padding: 9px 6px; font-weight: 700; font-size: 12px; color: #44403c;
+  }
+  table.items td { border: 1px solid #e7e5e4; padding: 8px 6px; vertical-align: top; }
+  table.items td.col-work, table.items td.col-qty, table.items td.col-unit,
+  table.items td.col-price, table.items td.col-amount { vertical-align: middle; }
+  table.items td input, table.items td select { border: none; background: transparent; padding: 5px 3px; font-size: 14px; }
+  table.items td input:focus, table.items td select:focus { background: #fff7ed; box-shadow: none; border-radius: 4px; }
+  table.items td.col-work select { width: 100%; min-width: 72px; }
+  table.items td.col-name { min-width: 150px; }
+  table.items td.col-qty input { text-align: right; width: 100%; font-size: 15px; }
+  table.items td.col-unit select { text-align: center; font-size: 14px; width: 100%; min-width: 60px; }
+  table.items td.col-price input { text-align: right; font-size: 15px; }
+  table.items td.col-amount { text-align: right; padding: 9px 8px; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 14px; }
+  table.items td.col-note { min-width: 140px; }
+  table.items td.col-note input { font-size: 13px; }
+  table.items td.col-del { text-align: center; width: 28px; }
+  tr.heading-row td.col-name input { font-weight: 700; }
+  tr.heading-row td.col-qty, tr.heading-row td.col-unit, tr.heading-row td.col-price, tr.heading-row td.col-amount { background: #fafaf9; }
+  .core-size-inline { display: flex; align-items: center; gap: 4px; margin-top: 3px; flex-wrap: nowrap; white-space: nowrap; }
+  .core-size-inline span { font-size: 10px; color: #a8a29e; flex-shrink: 0; }
+  .core-size-inline input { width: 56px; text-align: right; flex-shrink: 0; }
+
+  .del-btn { background: none; border: none; color: #d6d3d1; cursor: pointer; padding: 2px; font-size: 13px; }
+  .del-btn:hover { color: #ef4444; }
+  .add-line-btn {
+    width: 100%; border: 1px dashed #d6d3d1; color: #78716c; background: none; border-radius: 8px;
+    padding: 7px; font-size: 12px; cursor: pointer; margin: 8px 0 16px; display: flex; gap: 6px; justify-content: center;
+  }
+
+  .totals-wrap { display: flex; justify-content: flex-end; }
+  .totals { width: 280px; }
+  .totals-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; font-size: 13px; border-bottom: 1px solid #f5f5f4; }
+  .totals-row label { color: #57534e; }
+  .totals-row input.misc-input { width: 110px; text-align: right; }
+  .totals-row input.misc-note-input { text-align: left; font-size: 11px; color: #78716c; border: none; background: transparent; padding: 0; }
+  .totals-row label.misc-note-label { width: 64px; flex-shrink: 0; }
+  .totals-row.grand { border-top: 2px solid #1c1917; border-bottom: none; margin-top: 4px; padding-top: 8px; font-size: 16px; font-weight: 700; }
+
+  .reg-no-row { margin-top: 10px; font-size: 11px; color: #78716c; }
+  .reg-no-row input { display: inline-block; width: 200px; font-size: 11px; }
+  .bank-box { margin-top: 10px; border: 1px solid #e7e5e4; border-radius: 8px; padding: 8px 10px; background: #fff; }
+  .bank-box .title { font-size: 11px; font-weight: 700; margin: 0 0 6px; color: #292524; }
+  .bank-line-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+  .bank-line-row input { font-size: 12px; }
+  .add-bank-btn {
+    width: 100%; border: 1px dashed #d6d3d1; color: #78716c; background: none; border-radius: 6px;
+    padding: 5px; font-size: 11px; cursor: pointer;
+  }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .btn-row > button { flex: 1 1 130px; }
+  .btn-primary {
+    background: #f97316; color: #fff; border: none; border-radius: 8px;
+    padding: 10px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  .btn-primary:hover { background: #ea580c; }
+  .btn-secondary {
+    background: #fff; color: #57534e; border: 1px solid #e7e5e4; border-radius: 8px;
+    padding: 10px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  .price-note { font-size: 10px; color: #ea580c; margin-top: 2px; }
+
+  .section-card { padding: 16px; margin-bottom: 16px; }
+  .section-card h2 { font-size: 15px; margin: 0; }
+  .section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .sum-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .sum-table th, .sum-table td { padding: 6px; border: 1px solid #e7e5e4; }
+  .sum-table th { background: #f5f5f4; text-align: left; }
+  .sum-table td.num, .sum-table th.num { text-align: right; }
+  .empty-note { padding: 16px; text-align: center; color: #a8a29e; font-size: 13px; }
+
+  .doc-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding: 9px 2px; border-bottom: 1px solid #f5f5f4; font-size: 13px;
+  }
+  .doc-row:last-child { border-bottom: none; }
+  .doc-row .doc-row-info { min-width: 0; flex: 1; }
+  .doc-row .doc-row-title { font-weight: 700; }
+  .doc-row .doc-row-sub { color: #78716c; font-size: 11px; }
+  .doc-row .doc-row-amount { text-align: right; white-space: nowrap; font-weight: 700; }
+  .doc-row .doc-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .doc-row .doc-row-actions button { font-size: 16px; }
+  .client-group { padding: 12px 16px; margin-bottom: 12px; }
+  .client-group h3 { font-size: 14px; margin: 0 0 2px; }
+
+  .print-select-value, .print-input-value { display: none; }
+  @media print {
+    #app select { display: none !important; }
+    .print-select-value { display: inline !important; }
+    #client-name-input, #client-honorific-input { display: none !important; }
+    .print-input-value { display: inline !important; font-size: 13px; font-weight: 700; white-space: nowrap; }
+    input::placeholder, textarea::placeholder { color: transparent !important; }
+    input[type="date"]::-webkit-calendar-picker-indicator { display: none !important; }
+  }
+  @media print {
+    html, body { background: #fff; width: 210mm; }
+    .no-print { display: none !important; }
+    .wrap { max-width: 100%; width: 100%; padding: 0; }
+    .card { border: none; }
+    .doc-card { padding: 0; }
+    input, select, textarea {
+      border: none !important; box-shadow: none !important; background: transparent !important;
+      color: #000; padding: 1px 0 !important;
+    }
+    .doc-title { font-size: 20px; letter-spacing: 3px; }
+    .total-box { padding: 6px 12px; margin: 6px 0 10px; }
+    .total-box .val { font-size: 19px; }
+    .parties { gap: 12px; margin-bottom: 8px; }
+    .party-block { padding-bottom: 6px; }
+    .party-block .name-row input.company-name { font-size: 13px; }
+    #issuer-name-input { font-size: 10.5px; }
+    .greeting { font-size: 11px; margin: 4px 0 0; }
+    .site-row { margin-bottom: 8px; }
+    .site-row input { font-size: 12px; }
+    table.items { font-size: 10.5px; margin-bottom: 2px; min-width: 0; }
+    .items-table-wrap { overflow: visible; }
+    table.items thead th { padding: 4px 3px; font-size: 9.5px; }
+    table.items td { padding: 3px 3px; }
+    table.items td input, table.items td select { font-size: 10.5px; padding: 1px 2px !important; }
+    table.items td.col-qty input, table.items td.col-price input { font-size: 10.5px !important; }
+    table.items td.col-note input { font-size: 9.5px; }
+    table.items td.col-amount { font-size: 10.5px; padding: 4px 4px; }
+    .core-size-inline { font-size: 9px; }
+    .core-size-inline input { width: 34px; }
+    .totals-row { padding: 2px 0; font-size: 11px; }
+    .totals-row.grand { font-size: 13px; padding-top: 4px; }
+    .bank-box { font-size: 10px; margin-top: 6px; padding: 6px 10px; }
+    .bank-line-row { font-size: 10px; margin-bottom: 2px; }
+    table.items { page-break-inside: auto; }
+    table.items tr { page-break-inside: avoid; }
+    .del-btn, .add-line-btn { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+// ダイヤモンド・コア・ボーリング施工単価表(通常)
+const CORE_PRICE_TABLE = {
+  depthCols: [150, 200, 250, 300, 350, 400, 450, 500],
+  rows: [
+    { maxDia: 52,  prices: [2000, 2400, 2800, 3200, 3600, 4000, 4400, 4800] },
+    { maxDia: 65,  prices: [2200, 2800, 3400, 4000, 4600, 5200, 5800, 6400] },
+    { maxDia: 80,  prices: [2500, 3300, 4100, 4900, 5700, 6500, 7300, 8100] },
+    { maxDia: 90,  prices: [2800, 3700, 4600, 5500, 6400, 7300, 8200, 9100] },
+    { maxDia: 110, prices: [3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000] },
+    { maxDia: 130, prices: [3600, 4800, 6000, 7200, 8400, 9600, 10800, 12000] },
+    { maxDia: 160, prices: [4500, 6000, 7500, 9000, 10500, 12000, 13500, 15000] },
+    { maxDia: 180, prices: [5500, 7300, 9100, 10900, 12700, 14500, 16300, 18100] },
+    { maxDia: 210, prices: [7200, 9700, 12200, 14700, 17200, 19700, 22200, 24700] },
+    { maxDia: 230, prices: [9000, 12000, 15000, 18000, 21000, 24000, 27000, 30000] },
+    { maxDia: 260, prices: [12000, 16000, 20000, 24000, 28000, 32000, 36000, 40000] },
+    { maxDia: 310, prices: [15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000] },
+  ],
+};
+
+// DP ダイヤモンド・コア・ボーリング施工単価表
+const CORE_PRICE_TABLE_DP = {
+  depthCols: [150, 200, 250, 300, 350, 400, 450, 500],
+  rows: [
+    { maxDia: 52,  prices: [2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000] },
+    { maxDia: 65,  prices: [2500, 3200, 3900, 4600, 5300, 6000, 6700, 7400] },
+    { maxDia: 80,  prices: [3000, 3900, 4800, 5700, 6600, 7500, 8400, 9300] },
+    { maxDia: 90,  prices: [3500, 4500, 5500, 6500, 7500, 8500, 9500, 10500] },
+    { maxDia: 110, prices: [4000, 5200, 6400, 7600, 8800, 10000, 11200, 12400] },
+    { maxDia: 130, prices: [4500, 6000, 7500, 9000, 10500, 12000, 13500, 15000] },
+    { maxDia: 160, prices: [5000, 6800, 8600, 10400, 12200, 14000, 15800, 17600] },
+    { maxDia: 180, prices: [6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000] },
+    { maxDia: 210, prices: [7500, 10000, 12500, 15000, 17500, 20000, 22500, 25000] },
+    { maxDia: 230, prices: [10000, 13000, 16000, 19000, 22000, 25000, 28000, 31000] },
+    { maxDia: 260, prices: [13000, 17000, 21000, 25000, 29000, 33000, 37000, 41000] },
+    { maxDia: 310, prices: [20000, 25000, 30000, 35000, 40000, 45000, 50000, 55000] },
+  ],
+};
+
+function lookupCorePrice(diameter, depth, coreType) {
+  const d = parseFloat(diameter);
+  const l = parseFloat(depth);
+  if (isNaN(d) || isNaN(l) || d < 32 || d > 310 || l <= 0 || l > 500) return null;
+  const table = coreType === "DP" ? CORE_PRICE_TABLE_DP : CORE_PRICE_TABLE;
+  const row = table.rows.find((r) => d <= r.maxDia);
+  if (!row) return null;
+  const colIdx = table.depthCols.findIndex((c) => l <= c);
+  if (colIdx === -1) return null;
+  return row.prices[colIdx];
+}
+
+const ISSUER_PRESETS = {
+  "ナカミネ": {
+    issuerName: "株式会社ナカミネ",
+    issuerPostal: "〒062-0034",
+    issuerAddress: "北海道札幌市豊平区西岡4条7丁目8-1-W601",
+    issuerTel: "011-855-3143",
+    issuerFax: "011-855-3145",
+    issuerRegNo: "T4430001012204",
+    bankLines: ["北洋銀行　月寒中央支店　普)3914646", "北海道銀行　月寒支店　普)1062051"],
+  },
+  "JFコア工業": {
+    issuerName: "JFコア工業　㈱ジャストフレンズ",
+    issuerPostal: "〒062-0922",
+    issuerAddress: "北海道札幌市豊平区中の島2条7丁目2-2 MTビル1F",
+    issuerTel: "011-598-1010",
+    issuerFax: "",
+    issuerRegNo: "T5430001064731",
+    bankLines: ["北海道銀行　山鼻支店(店番191)　普)0355898　カ）ジヤストフレンズ"],
+  },
+};
+
+const WORK_TYPES = ["はつり", "コア抜き", "雑工", "自由入力", "見出し行"];
+const UNITS = ["本", "式", "人", "人工", "相番", "m2", "m"];
+const STORAGE_KEY = "mitsumori-draft-v2";
+
+function uid() {
+  return Date.now().toString() + Math.random().toString(36).slice(2, 7);
+}
+
+function newLineItem() {
+  return {
+    id: uid(), work: WORK_TYPES[0], label: "", diameter: "", depth: "", coreType: "通常",
+    length: "", width: "",
+    qty: "1", unit: UNITS[0], price: "", note: "", autoPriced: false,
+  };
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+let state = {
+  tab: "作成",
+
+  docType: "見積書",
+  docNumber: "",
+  docDate: todayStr(),
+
+  issuerPreset: "ナカミネ",
+  issuerName: "株式会社ナカミネ",
+  issuerPostal: "〒062-0034",
+  issuerAddress: "北海道札幌市豊平区西岡4条7丁目8-1-W601",
+  issuerTel: "011-855-3143",
+  issuerFax: "011-855-3145",
+  issuerRegNo: "T4430001012204",
+  bankLines: ["北洋銀行　月寒中央支店　普)3914646", "北海道銀行　月寒支店　普)1062051"],
+
+  miscExpense: "",
+  miscNote: "",
+  eightPercentAmount: "",
+
+  clientName: "",
+  clientHonorific: "様",
+  clientPostal: "",
+  clientAddress: "",
+  clientTel: "",
+  clientFax: "",
+
+  siteName: "",
+
+  items: [newLineItem()],
+
+  // 保存済み書類(会社ごとの明細)
+  documents: [],
+  editingDocId: null,
+  docQuery: "",
+  summaryYear: "",
+  summaryClient: "",
+};
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      state = Object.assign(state, parsed);
+      if (!state.items || state.items.length === 0) state.items = [newLineItem()];
+      if (!Array.isArray(state.bankLines) || state.bankLines.length === 0) {
+        const preset = ISSUER_PRESETS[state.issuerPreset] || ISSUER_PRESETS["ナカミネ"];
+        state.bankLines = (preset.bankLines || [""]).slice();
+      }
+      if (!Array.isArray(state.documents)) state.documents = [];
+      if (!state.tab) state.tab = "作成";
+    }
+  } catch (e) {}
+}
+
+function saveDraft() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {}
+}
+
+function toNum(v) {
+  if (v == null) return NaN;
+  return parseFloat(String(v).replace(/,/g, ""));
+}
+
+function fmtYen(n) {
+  return "¥" + Math.round(n || 0).toLocaleString();
+}
+
+function fmtNum(n) {
+  return Math.round(n || 0).toLocaleString();
+}
+
+function isHeading(it) {
+  return it.work === "見出し行";
+}
+
+function lineTotal(it) {
+  if (isHeading(it)) return 0;
+  const price = toNum(it.price);
+  if (isNaN(price)) return 0;
+  const qty = toNum(it.qty);
+  const multiplier = !isNaN(qty) && qty > 0 ? qty : 1;
+  return price * multiplier;
+}
+
+function subtotal() {
+  return state.items.reduce((sum, it) => sum + lineTotal(it), 0);
+}
+
+function misc() {
+  const v = toNum(state.miscExpense);
+  return isNaN(v) ? 0 : v;
+}
+
+// 法定福利費 = 工事代金(小計) × 労務比率75% × 事業主負担分16.05%
+function legalWelfare() {
+  return Math.round(subtotal() * 0.75 * 0.1605);
+}
+
+function legalWelfareFormula() {
+  return "工事代金" + fmtNum(subtotal()) + "×労務比率75%×事業主負担分16.05%＝" + fmtNum(legalWelfare());
+}
+
+function taxBase() {
+  return subtotal() + legalWelfare() + misc();
+}
+
+function eightPercentBase() {
+  const v = toNum(state.eightPercentAmount);
+  return isNaN(v) ? 0 : v;
+}
+
+function tenPercentBase() {
+  return Math.max(0, taxBase() - eightPercentBase());
+}
+
+function tax() {
+  return Math.round(tenPercentBase() * 0.1) + Math.round(eightPercentBase() * 0.08);
+}
+
+function grandTotal() {
+  return taxBase() + tax();
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ===================== 保存済み書類まわり ===================== */
+
+function docToRecord() {
+  return {
+    id: state.editingDocId || uid(),
+    savedAt: new Date().toISOString(),
+    docType: state.docType,
+    docNumber: state.docNumber,
+    docDate: state.docDate,
+    issuerPreset: state.issuerPreset,
+    issuerName: state.issuerName,
+    issuerPostal: state.issuerPostal,
+    issuerAddress: state.issuerAddress,
+    issuerTel: state.issuerTel,
+    issuerFax: state.issuerFax,
+    issuerRegNo: state.issuerRegNo,
+    bankLines: state.bankLines.slice(),
+    miscExpense: state.miscExpense,
+    miscNote: state.miscNote,
+    eightPercentAmount: state.eightPercentAmount,
+    clientName: state.clientName,
+    clientHonorific: state.clientHonorific,
+    clientPostal: state.clientPostal,
+    clientAddress: state.clientAddress,
+    clientTel: state.clientTel,
+    clientFax: state.clientFax,
+    siteName: state.siteName,
+    items: state.items.map((it) => Object.assign({}, it)),
+    subtotal: subtotal(),
+    tax: tax(),
+    grandTotal: grandTotal(),
+  };
+}
+
+function saveDocument() {
+  if (!state.clientName.trim()) {
+    alert("宛先(会社名)を入力してから保存してください。");
+    return;
+  }
+  const record = docToRecord();
+  const idx = state.documents.findIndex((d) => d.id === record.id);
+  if (idx !== -1) state.documents[idx] = record;
+  else state.documents.push(record);
+  state.editingDocId = record.id;
+  saveDraft();
+  render();
+  alert("保存しました。「一覧」「集計」タブから確認・修正・削除できます。");
+}
+
+function openDocument(id) {
+  const doc = state.documents.find((d) => d.id === id);
+  if (!doc) return;
+  state.editingDocId = doc.id;
+  state.docType = doc.docType;
+  state.docNumber = doc.docNumber;
+  state.docDate = doc.docDate;
+  state.issuerPreset = doc.issuerPreset;
+  state.issuerName = doc.issuerName;
+  state.issuerPostal = doc.issuerPostal;
+  state.issuerAddress = doc.issuerAddress;
+  state.issuerTel = doc.issuerTel;
+  state.issuerFax = doc.issuerFax;
+  state.issuerRegNo = doc.issuerRegNo;
+  state.bankLines = (doc.bankLines && doc.bankLines.length ? doc.bankLines : [""]).slice();
+  state.miscExpense = doc.miscExpense;
+  state.miscNote = doc.miscNote;
+  state.eightPercentAmount = doc.eightPercentAmount;
+  state.clientName = doc.clientName;
+  state.clientHonorific = doc.clientHonorific;
+  state.clientPostal = doc.clientPostal;
+  state.clientAddress = doc.clientAddress;
+  state.clientTel = doc.clientTel;
+  state.clientFax = doc.clientFax;
+  state.siteName = doc.siteName;
+  state.items = (doc.items && doc.items.length ? doc.items : [newLineItem()]).map((it) => Object.assign({}, it));
+  state.tab = "作成";
+  saveDraft();
+  render();
+}
+
+function deleteDocument(id) {
+  const doc = state.documents.find((d) => d.id === id);
+  if (!doc) return;
+  const ok = confirm(
+    "この書類を削除します。よろしいですか?\n" +
+    doc.docType + " No." + (doc.docNumber || "(なし)") + "\n" +
+    (doc.clientName || "") + " / " + fmtYen(doc.grandTotal)
+  );
+  if (!ok) return;
+  state.documents = state.documents.filter((d) => d.id !== id);
+  if (state.editingDocId === id) state.editingDocId = null;
+  saveDraft();
+  render();
+}
+
+function buildCompanySummary(year) {
+  const map = {};
+  state.documents.forEach((doc) => {
+    const y = (doc.docDate || "").slice(0, 4);
+    if (year !== "all" && y !== year) return;
+    const key = doc.clientName && doc.clientName.trim() ? doc.clientName : "(未設定)";
+    if (!map[key]) map[key] = { estimateTotal: 0, invoiceTotal: 0, count: 0, months: {} };
+    const g = map[key];
+    g.count++;
+    const amt = doc.grandTotal || 0;
+    if (doc.docType === "見積書") g.estimateTotal += amt;
+    else g.invoiceTotal += amt;
+    const m = parseInt((doc.docDate || "").slice(5, 7), 10);
+    if (m) {
+      if (!g.months[m]) g.months[m] = { estimateTotal: 0, invoiceTotal: 0 };
+      if (doc.docType === "見積書") g.months[m].estimateTotal += amt;
+      else g.months[m].invoiceTotal += amt;
+    }
+  });
+  return map;
+}
+
+function getAvailableYears() {
+  const years = new Set();
+  state.documents.forEach((d) => { if (d.docDate) years.add(d.docDate.slice(0, 4)); });
+  years.add(String(new Date().getFullYear()));
+  return Array.from(years).sort().reverse();
+}
+
+// 過去に保存した見積書・請求書から宛先(会社)情報を集めて予測変換候補にする
+function getKnownClients() {
+  const map = {};
+  state.documents
+    .slice()
+    .sort((a, b) => (a.savedAt || "").localeCompare(b.savedAt || ""))
+    .forEach((d) => {
+      const name = (d.clientName || "").trim();
+      if (!name) return;
+      map[name] = {
+        name,
+        postal: d.clientPostal || "",
+        address: d.clientAddress || "",
+        tel: d.clientTel || "",
+        fax: d.clientFax || "",
+        honorific: d.clientHonorific || "様",
+      };
+    });
+  return Object.values(map);
+}
+
+function renderDocRow(doc) {
+  return `
+    <div class="doc-row">
+      <div class="doc-row-info">
+        <div class="doc-row-title">${esc(doc.docType)}${doc.docNumber ? " No." + esc(doc.docNumber) : ""}</div>
+        <div class="doc-row-sub">📅 ${esc(doc.docDate || "")}${doc.siteName ? " ・ 📍 " + esc(doc.siteName) : ""}</div>
+      </div>
+      <div class="doc-row-amount">${esc(fmtYen(doc.grandTotal))}</div>
+      <div class="doc-row-actions no-print">
+        <button class="del-btn" data-action="open-doc" data-id="${doc.id}" title="開く・編集">✏️</button>
+        <button class="del-btn" data-action="delete-doc" data-id="${doc.id}" title="削除">🗑</button>
+      </div>
+    </div>`;
+}
+
+function renderDocListResults() {
+  const q = (state.docQuery || "").trim();
+  let docs = state.documents.slice().sort((a, b) =>
+    (b.docDate || "").localeCompare(a.docDate || "") || (b.savedAt || "").localeCompare(a.savedAt || "")
+  );
+  if (q) {
+    docs = docs.filter((d) =>
+      (d.clientName || "").indexOf(q) !== -1 ||
+      (d.docNumber || "").indexOf(q) !== -1 ||
+      (d.siteName || "").indexOf(q) !== -1
+    );
+  }
+  if (!docs.length) {
+    return `<div class="card empty-note">${state.documents.length ? "該当する書類がありません" : "保存された書類はまだありません。「作成」タブで入力後、保存してください。"}</div>`;
+  }
+  const groups = {};
+  const order = [];
+  docs.forEach((d) => {
+    const key = d.clientName && d.clientName.trim() ? d.clientName : "(未設定)";
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(d);
+  });
+  return order.map((key) => `
+    <div class="card client-group">
+      <h3>${esc(key)}</h3>
+      ${groups[key].map((d) => renderDocRow(d)).join("")}
+    </div>`).join("");
+}
+
+function renderListTab() {
+  return `
+    <div class="card no-print" style="padding:12px 16px;margin-bottom:12px;">
+      <input type="text" id="doc-search-input" placeholder="会社名・No.・現場名で検索" value="${esc(state.docQuery || "")}" />
+    </div>
+    <div id="doc-list-results">${renderDocListResults()}</div>
+  `;
+}
+
+function renderClientMonthly(year, client, data) {
+  let monthRows = "";
+  for (let m = 1; m <= 12; m++) {
+    const md = data.months[m];
+    if (!md) continue;
+    monthRows += `<tr>
+      <td>${m}月</td>
+      <td class="num">${esc(fmtYen(md.estimateTotal))}</td>
+      <td class="num">${esc(fmtYen(md.invoiceTotal))}</td>
+    </tr>`;
+  }
+  const docs = state.documents
+    .filter((d) => (d.clientName && d.clientName.trim() ? d.clientName : "(未設定)") === client && (d.docDate || "").slice(0, 4) === year)
+    .sort((a, b) => (b.docDate || "").localeCompare(a.docDate || ""));
+
+  return `
+    <table class="sum-table" style="margin-bottom:14px;">
+      <thead><tr><th>月</th><th class="num">見積合計</th><th class="num">請求合計</th></tr></thead>
+      <tbody>${monthRows || `<tr><td colspan="3" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}</tbody>
+    </table>
+    <div>${docs.map((d) => renderDocRow(d)).join("") || ""}</div>
+  `;
+}
+
+function renderSummaryTab() {
+  const years = getAvailableYears();
+  const year = years.indexOf(state.summaryYear) !== -1 ? state.summaryYear : years[0];
+  const summary = buildCompanySummary(year);
+  const companies = Object.keys(summary).sort();
+  const selectedClient = companies.indexOf(state.summaryClient) !== -1 ? state.summaryClient : (companies[0] || "");
+
+  return `
+    <div class="card section-card">
+      <div class="section-head">
+        <h2>年間・会社別集計</h2>
+        <select id="summary-year-select" style="width:100px;">
+          ${years.map((y) => `<option value="${y}" ${y === year ? "selected" : ""}>${y}年</option>`).join("")}
+        </select>
+      </div>
+      <table class="sum-table">
+        <thead><tr><th>会社名</th><th class="num">件数</th><th class="num">見積合計</th><th class="num">請求合計</th></tr></thead>
+        <tbody>
+          ${companies.length ? companies.map((c) => `
+            <tr>
+              <td>${esc(c)}</td>
+              <td class="num">${summary[c].count}</td>
+              <td class="num">${esc(fmtYen(summary[c].estimateTotal))}</td>
+              <td class="num">${esc(fmtYen(summary[c].invoiceTotal))}</td>
+            </tr>`).join("") : `<tr><td colspan="4" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card section-card">
+      <div class="section-head">
+        <h2>会社別・月別明細</h2>
+        ${companies.length ? `
+          <select id="summary-client-select" style="width:170px;">
+            ${companies.map((c) => `<option value="${esc(c)}" ${c === selectedClient ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          </select>` : ""}
+      </div>
+      ${selectedClient ? renderClientMonthly(year, selectedClient, summary[selectedClient]) : `<p class="empty-note">対象のデータがありません</p>`}
+    </div>
+  `;
+}
+
+/* ===================== 描画本体 ===================== */
+
+function render() {
+  const scrollY = window.scrollY;
+  const app = document.getElementById("app");
+  let body = "";
+  if (state.tab === "一覧") {
+    body = renderListTab();
+  } else if (state.tab === "集計") {
+    body = renderSummaryTab();
+  } else {
+    body = renderDocTypeTabs() + renderDoc();
+  }
+  app.innerHTML = renderHeader() + renderMainTabs() + body;
+  bindEvents();
+  window.scrollTo(0, scrollY);
+}
+
+function renderHeader() {
+  return `
+    <header class="card no-print">
+      <p class="company">株式会社ナカミネ</p>
+      <h1>見積書・請求書作成</h1>
+    </header>`;
+}
+
+function renderMainTabs() {
+  return `
+    <div class="tabs no-print">
+      <button data-action="main-tab" data-val="作成" class="${state.tab === "作成" ? "active" : ""}">作成</button>
+      <button data-action="main-tab" data-val="一覧" class="${state.tab === "一覧" ? "active" : ""}">一覧</button>
+      <button data-action="main-tab" data-val="集計" class="${state.tab === "集計" ? "active" : ""}">集計</button>
+    </div>`;
+}
+
+function renderDocTypeTabs() {
+  return `
+    <div class="tabs no-print">
+      <button data-action="doctype" data-val="見積書" class="${state.docType === "見積書" ? "active" : ""}">見積書</button>
+      <button data-action="doctype" data-val="請求書" class="${state.docType === "請求書" ? "active" : ""}">請求書</button>
+    </div>`;
+}
+
+function renderDoc() {
+  return `
+    <div class="card doc-card">
+      <div class="doc-top">
+        <p class="doc-title">${esc(state.docType)}</p>
+        <div class="doc-meta">
+          <div class="row"><label>No.</label><input type="text" id="docnumber-input" placeholder="例: M00068" value="${esc(state.docNumber)}" /></div>
+          <div class="row"><label>日付</label><input type="date" id="date-input" value="${esc(state.docDate)}" /></div>
+          <div class="row"><label>登録番号</label><input type="text" id="regno-input" placeholder="T0000000000000" value="${esc(state.issuerRegNo)}" /></div>
+        </div>
+      </div>
+
+      <div class="parties">
+        <div class="party-block client-block">
+          <div class="name-row">
+            <input type="text" class="company-name" id="client-name-input" list="client-name-list" autocomplete="off" placeholder="宛先 会社名・氏名" value="${esc(state.clientName)}" />
+            <select class="honorific" id="client-honorific-input">
+              <option value="様" ${state.clientHonorific === "様" ? "selected" : ""}>様</option>
+              <option value="御中" ${state.clientHonorific === "御中" ? "selected" : ""}>御中</option>
+            </select>
+          </div>
+          <datalist id="client-name-list">
+            ${getKnownClients().map((c) => `<option value="${esc(c.name)}"></option>`).join("")}
+          </datalist>
+          <div class="sub-row"><input type="text" class="postal" id="client-postal-input" placeholder="〒000-0000" value="${esc(state.clientPostal)}" /></div>
+          <div class="sub-row"><input type="text" id="client-address-input" placeholder="住所" value="${esc(state.clientAddress)}" /></div>
+          <div class="sub-row2"><input type="text" id="client-tel-input" placeholder="TEL" value="${esc(state.clientTel)}" /><input type="text" id="client-fax-input" placeholder="FAX" value="${esc(state.clientFax)}" /></div>
+          <p class="greeting">下記の通り${state.docType === "見積書" ? "御見積り" : "御請求"}申し上げます。</p>
+        </div>
+        <div class="party-block issuer-block">
+          <select id="issuer-preset-input" class="no-print" style="margin-bottom:6px;font-size:11px;width:140px;">
+            <option value="ナカミネ" ${state.issuerPreset === "ナカミネ" ? "selected" : ""}>株式会社ナカミネ</option>
+            <option value="JFコア工業" ${state.issuerPreset === "JFコア工業" ? "selected" : ""}>JFコア工業　㈱ジャストフレンズ</option>
+          </select>
+          <div class="name-row">
+            <input type="text" class="company-name" id="issuer-name-input" value="${esc(state.issuerName)}" />
+          </div>
+          <div class="sub-row"><input type="text" class="postal" id="issuer-postal-input" value="${esc(state.issuerPostal)}" /></div>
+          <div class="sub-row"><input type="text" id="issuer-address-input" value="${esc(state.issuerAddress)}" /></div>
+          <div class="sub-row2"><input type="text" id="issuer-tel-input" placeholder="TEL" value="${esc(state.issuerTel)}" /><input type="text" id="issuer-fax-input" placeholder="FAX" value="${esc(state.issuerFax)}" /></div>
+          ${state.docType === "請求書" ? `
+            <div class="bank-box">
+              <p class="title">お振込先</p>
+              ${state.bankLines.map((line, i) => `
+                <div class="bank-line-row">
+                  <input type="text" data-bank-idx="${i}" placeholder="例: 北海道銀行　〇〇支店　普)1234567" value="${esc(line)}" />
+                  <button class="del-btn no-print" data-action="del-bank-line" data-idx="${i}">🗑</button>
+                </div>
+              `).join("")}
+              <button class="add-bank-btn no-print" data-action="add-bank-line">+ 振込先を追加</button>
+            </div>
+          ` : ""}
+        </div>
+      </div>
+
+      <div class="total-box">
+        <span class="lbl">${state.docType === "請求書" ? "今回御請求額" : "合計金額"}</span>
+        <span class="val" id="total-box-val">${esc(fmtYen(grandTotal()))}</span>
+      </div>
+
+      <div class="site-row">
+        <label class="sm">現場名</label>
+        <input type="text" id="site-input" placeholder="例: 〇〇マンション新築工事" value="${esc(state.siteName)}" />
+      </div>
+
+      <div class="items-table-wrap">
+        <table class="items">
+          <thead>
+            <tr>
+              <th style="width:11%;">作業内容</th>
+              <th style="width:15%;">品名</th>
+              <th style="width:9%;">数量</th>
+              <th style="width:9%;">単位</th>
+              <th style="width:18%;">単価</th>
+              <th style="width:20%;">金額</th>
+              <th style="width:16%;">備考</th>
+              <th class="no-print" style="width:20px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.items.map((it) => renderLineRow(it)).join("")}
+          </tbody>
+        </table>
+      </div>
+      <button class="add-line-btn no-print" data-action="add-line">+ 明細行を追加</button>
+
+      <div class="totals-wrap">
+        <div class="totals">
+          <div class="totals-row"><label>小計</label><span id="totals-subtotal">${esc(fmtNum(subtotal()))}</span></div>
+          <div class="totals-row" style="align-items:flex-start;">
+            <label>法定福利費</label>
+            <span id="totals-legal" style="font-size:10.5px;text-align:right;max-width:200px;line-height:1.4;">${esc(legalWelfareFormula())}</span>
+          </div>
+          <div class="totals-row">
+            <label>諸経費</label>
+            <input type="text" inputmode="decimal" class="misc-input" id="misc-input" placeholder="0" value="${esc(state.miscExpense)}" />
+          </div>
+          <div class="totals-row"><label class="misc-note-label">　</label><input type="text" id="misc-note-input" class="misc-note-input" placeholder="例: 交通費など" value="${esc(state.miscNote)}" /></div>
+          <div class="totals-row"><label>10%対象</label><span id="totals-ten">${esc(fmtNum(tenPercentBase()))}</span></div>
+          <div class="totals-row">
+            <label>8%対象</label>
+            <input type="text" inputmode="decimal" class="misc-input" id="eight-percent-input" placeholder="0" value="${esc(state.eightPercentAmount)}" />
+          </div>
+          <div class="totals-row"><label>消費税</label><span id="totals-tax">${esc(fmtNum(tax()))}</span></div>
+          <div class="totals-row grand"><label>${state.docType === "請求書" ? "今回御請求額" : "合計金額"}</label><span id="totals-grand">${esc(fmtYen(grandTotal()))}</span></div>
+        </div>
+      </div>
+
+      ${state.editingDocId ? `<p class="price-note no-print" style="color:#2563eb;">✏️ 保存済みの書類を編集中です(保存すると上書きされます)</p>` : ""}
+
+      <div class="btn-row no-print">
+        <button class="btn-secondary" data-action="clear">${state.editingDocId ? "新規作成" : "クリア"}</button>
+        <button class="btn-primary" data-action="save-doc">${state.editingDocId ? "更新保存する" : "保存する"}</button>
+        <button class="btn-primary" data-action="print">🖨 印刷 / PDF保存</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderLineRow(it) {
+  const workSelect = `<select data-li="${it.id}" data-field="work">
+    ${WORK_TYPES.map((w) => `<option value="${w}" ${it.work === w ? "selected" : ""}>${w === "見出し行" ? "見出し" : w}</option>`).join("")}
+  </select>`;
+  if (isHeading(it)) {
+    return `
+      <tr class="heading-row" data-row="${it.id}">
+        <td class="col-work">${workSelect}</td>
+        <td class="col-name" colspan="1"><input type="text" data-li="${it.id}" data-field="label" placeholder="見出し(例: 5F)" value="${esc(it.label)}" /></td>
+        <td class="col-qty"></td>
+        <td class="col-unit"></td>
+        <td class="col-price"></td>
+        <td class="col-amount"></td>
+        <td class="col-note"><input type="text" data-li="${it.id}" data-field="note" placeholder="備考" value="${esc(it.note)}" /></td>
+        <td class="col-del no-print"><button class="del-btn" data-action="del-line" data-id="${it.id}">🗑</button></td>
+      </tr>`;
+  }
+  const isCore = it.work === "コア抜き";
+  const isHatsuri = it.work === "はつり";
+  const nameField = isCore
+    ? `<input type="text" data-li="${it.id}" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
+       <div class="core-size-inline">
+         <span>Φ</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="diameter" value="${esc(it.diameter)}" />
+         <span>×厚</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="depth" value="${esc(it.depth)}" />
+         <span>mm</span>
+       </div>
+       ${`<p class="price-note" id="price-note-${it.id}">${it.diameter && it.depth && !lookupCorePrice(it.diameter, it.depth, it.coreType) ? "表の範囲外(手入力)" : ""}</p>`}`
+    : isHatsuri
+    ? `<input type="text" data-li="${it.id}" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
+       <div class="core-size-inline">
+         <span>長</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="length" value="${esc(it.length)}" />
+         <span>×幅</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="width" value="${esc(it.width)}" />
+         <span>×深</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="depth" value="${esc(it.depth)}" />
+         <span>mm</span>
+       </div>`
+    : `<input type="text" data-li="${it.id}" data-field="label" placeholder="${it.work === "自由入力" ? "品名を入力" : "品名・補足(任意)"}" value="${esc(it.label)}" />`;
+
+  return `
+    <tr data-row="${it.id}">
+      <td class="col-work">${workSelect}</td>
+      <td class="col-name">${nameField}</td>
+      <td class="col-qty"><input type="text" inputmode="decimal" data-li="${it.id}" data-field="qty" value="${esc(it.qty)}" /></td>
+      <td class="col-unit">
+        <select data-li="${it.id}" data-field="unit">
+          ${UNITS.map((u) => `<option value="${u}" ${it.unit === u ? "selected" : ""}>${u}</option>`).join("")}
+        </select>
+      </td>
+      <td class="col-price"><input type="text" inputmode="decimal" data-li="${it.id}" data-field="price" value="${esc(it.price)}" /></td>
+      <td class="col-amount" id="amount-${it.id}">${it.price ? esc(fmtNum(lineTotal(it))) : ""}</td>
+      <td class="col-note"><input type="text" data-li="${it.id}" data-field="note" placeholder="備考" value="${esc(it.note)}" /></td>
+      <td class="col-del no-print"><button class="del-btn" data-action="del-line" data-id="${it.id}">🗑</button></td>
+    </tr>`;
+}
+
+function updateTotalsDom() {
+  const subEl = document.getElementById("totals-subtotal");
+  const legalEl = document.getElementById("totals-legal");
+  const tenEl = document.getElementById("totals-ten");
+  const taxEl = document.getElementById("totals-tax");
+  const grandEl = document.getElementById("totals-grand");
+  const boxEl = document.getElementById("total-box-val");
+  if (subEl) subEl.textContent = fmtNum(subtotal());
+  if (legalEl) legalEl.textContent = legalWelfareFormula();
+  if (tenEl) tenEl.textContent = fmtNum(tenPercentBase());
+  if (taxEl) taxEl.textContent = fmtNum(tax());
+  if (grandEl) grandEl.textContent = fmtYen(grandTotal());
+  if (boxEl) boxEl.textContent = fmtYen(grandTotal());
+}
+
+function bindDocRowEvents(root) {
+  const scope = root || document;
+  scope.querySelectorAll('[data-action="open-doc"]').forEach((btn) => {
+    btn.addEventListener("click", () => openDocument(btn.dataset.id));
+  });
+  scope.querySelectorAll('[data-action="delete-doc"]').forEach((btn) => {
+    btn.addEventListener("click", () => deleteDocument(btn.dataset.id));
+  });
+}
+
+function bindEvents() {
+  document.querySelectorAll('[data-action="main-tab"]').forEach((el) => {
+    el.addEventListener("click", () => { state.tab = el.dataset.val; saveDraft(); render(); });
+  });
+
+  document.querySelectorAll('[data-action="doctype"]').forEach((el) => {
+    el.addEventListener("click", () => { state.docType = el.dataset.val; saveDraft(); render(); });
+  });
+
+  // 一覧タブ
+  const searchEl = document.getElementById("doc-search-input");
+  if (searchEl) {
+    searchEl.addEventListener("input", (e) => {
+      state.docQuery = e.target.value;
+      saveDraft();
+      const resultsEl = document.getElementById("doc-list-results");
+      if (resultsEl) {
+        resultsEl.innerHTML = renderDocListResults();
+        bindDocRowEvents(resultsEl);
+      }
+    });
+  }
+  bindDocRowEvents(document);
+
+  // 集計タブ
+  const summaryYearEl = document.getElementById("summary-year-select");
+  if (summaryYearEl) summaryYearEl.addEventListener("change", (e) => {
+    state.summaryYear = e.target.value;
+    state.summaryClient = "";
+    saveDraft();
+    render();
+  });
+  const summaryClientEl = document.getElementById("summary-client-select");
+  if (summaryClientEl) summaryClientEl.addEventListener("change", (e) => {
+    state.summaryClient = e.target.value;
+    saveDraft();
+    render();
+  });
+
+  const simpleFields = {
+    "docnumber-input": "docNumber", "date-input": "docDate",
+    "client-postal-input": "clientPostal",
+    "client-address-input": "clientAddress", "client-tel-input": "clientTel", "client-fax-input": "clientFax",
+    "issuer-name-input": "issuerName", "issuer-postal-input": "issuerPostal",
+    "issuer-address-input": "issuerAddress", "issuer-tel-input": "issuerTel", "issuer-fax-input": "issuerFax",
+    "site-input": "siteName", "regno-input": "issuerRegNo", "misc-note-input": "miscNote",
+  };
+  Object.keys(simpleFields).forEach((elId) => {
+    const el = document.getElementById(elId);
+    if (el) el.addEventListener("input", (e) => { state[simpleFields[elId]] = e.target.value; saveDraft(); });
+  });
+
+  const honorificEl = document.getElementById("client-honorific-input");
+  if (honorificEl) honorificEl.addEventListener("change", (e) => { state.clientHonorific = e.target.value; saveDraft(); });
+
+  // 宛先会社名の予測変換: 過去に保存した書類と同じ会社名になったら住所・電話・FAXを自動入力
+  const clientNameEl = document.getElementById("client-name-input");
+  if (clientNameEl) {
+    clientNameEl.addEventListener("input", (e) => {
+      state.clientName = e.target.value;
+      const known = getKnownClients().find((c) => c.name === state.clientName.trim());
+      if (known) {
+        state.clientPostal = known.postal;
+        state.clientAddress = known.address;
+        state.clientTel = known.tel;
+        state.clientFax = known.fax;
+        state.clientHonorific = known.honorific;
+        const postalEl = document.getElementById("client-postal-input");
+        const addressEl = document.getElementById("client-address-input");
+        const telEl = document.getElementById("client-tel-input");
+        const faxEl = document.getElementById("client-fax-input");
+        const honEl = document.getElementById("client-honorific-input");
+        if (postalEl) postalEl.value = known.postal;
+        if (addressEl) addressEl.value = known.address;
+        if (telEl) telEl.value = known.tel;
+        if (faxEl) faxEl.value = known.fax;
+        if (honEl) honEl.value = known.honorific;
+      }
+      saveDraft();
+    });
+  }
+
+  document.querySelectorAll('[data-bank-idx]').forEach((el) => {
+    el.addEventListener("input", (e) => {
+      const idx = parseInt(el.dataset.bankIdx, 10);
+      state.bankLines[idx] = e.target.value;
+      saveDraft();
+    });
+  });
+  document.querySelectorAll('[data-action="del-bank-line"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      state.bankLines.splice(idx, 1);
+      if (state.bankLines.length === 0) state.bankLines = [""];
+      saveDraft();
+      render();
+    });
+  });
+  const addBankBtn = document.querySelector('[data-action="add-bank-line"]');
+  if (addBankBtn) addBankBtn.addEventListener("click", () => {
+    state.bankLines.push("");
+    saveDraft();
+    render();
+  });
+
+  const eightPercentEl = document.getElementById("eight-percent-input");
+  if (eightPercentEl) {
+    eightPercentEl.addEventListener("input", (e) => { state.eightPercentAmount = e.target.value; saveDraft(); updateTotalsDom(); });
+    eightPercentEl.addEventListener("blur", (e) => {
+      const num = toNum(state.eightPercentAmount);
+      if (!isNaN(num)) {
+        state.eightPercentAmount = num.toLocaleString();
+        e.target.value = state.eightPercentAmount;
+        saveDraft();
+        updateTotalsDom();
+      }
+    });
+  }
+
+  const issuerPresetEl = document.getElementById("issuer-preset-input");
+  if (issuerPresetEl) issuerPresetEl.addEventListener("change", (e) => {
+    state.issuerPreset = e.target.value;
+    Object.assign(state, ISSUER_PRESETS[e.target.value]);
+    saveDraft();
+    render();
+  });
+
+  const miscEl = document.getElementById("misc-input");
+  if (miscEl) {
+    miscEl.addEventListener("input", (e) => { state.miscExpense = e.target.value; saveDraft(); updateTotalsDom(); });
+    miscEl.addEventListener("blur", (e) => {
+      const num = toNum(state.miscExpense);
+      if (!isNaN(num)) {
+        state.miscExpense = num.toLocaleString();
+        e.target.value = state.miscExpense;
+        saveDraft();
+        updateTotalsDom();
+      }
+    });
+  }
+
+  document.querySelectorAll('[data-li]').forEach((el) => {
+    const eventName = el.tagName === "SELECT" ? "change" : "input";
+    el.addEventListener(eventName, (e) => {
+      const id = el.dataset.li;
+      const field = el.dataset.field;
+      const val = e.target.value;
+      const item = state.items.find((it) => it.id === id);
+      if (!item) return;
+      item[field] = val;
+
+      if (field === "diameter" || field === "depth" || field === "coreType") {
+        const auto = lookupCorePrice(item.diameter, item.depth, item.coreType);
+        if (auto != null) { item.price = String(auto); item.autoPriced = true; }
+        else { item.autoPriced = false; }
+      }
+      if (field === "price") item.autoPriced = false;
+
+      saveDraft();
+
+      if (field === "work") {
+        render();
+        return;
+      }
+
+      if (field === "diameter" || field === "depth" || field === "coreType") {
+        const priceInput = document.querySelector(`[data-li="${id}"][data-field="price"]`);
+        if (priceInput) priceInput.value = item.price;
+        const noteEl = document.getElementById(`price-note-${id}`);
+        if (noteEl) {
+          noteEl.textContent = item.diameter && item.depth && !lookupCorePrice(item.diameter, item.depth, item.coreType)
+            ? "表の範囲外(手入力)" : "";
+        }
+        const amountEl = document.getElementById(`amount-${id}`);
+        if (amountEl) amountEl.textContent = item.price ? fmtNum(lineTotal(item)) : "";
+        updateTotalsDom();
+        return;
+      }
+
+      const amountEl = document.getElementById(`amount-${id}`);
+      if (amountEl) amountEl.textContent = item.price ? fmtNum(lineTotal(item)) : "";
+      updateTotalsDom();
+    });
+
+    if (el.dataset.field === "price" || el.dataset.field === "qty") {
+      el.addEventListener("blur", (e) => {
+        const id = el.dataset.li;
+        const field = el.dataset.field;
+        const item = state.items.find((it) => it.id === id);
+        if (!item) return;
+        const num = toNum(item[field]);
+        if (!isNaN(num)) {
+          item[field] = num.toLocaleString();
+          e.target.value = item[field];
+          saveDraft();
+          const amountEl = document.getElementById(`amount-${id}`);
+          if (amountEl) amountEl.textContent = item.price ? fmtNum(lineTotal(item)) : "";
+          updateTotalsDom();
+        }
+      });
+    }
+  });
+
+  document.querySelectorAll('[data-action="del-line"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (state.items.length > 1) {
+        state.items = state.items.filter((it) => it.id !== btn.dataset.id);
+      } else {
+        state.items = [newLineItem()];
+      }
+      saveDraft();
+      render();
+    });
+  });
+
+  const addLineBtn = document.querySelector('[data-action="add-line"]');
+  if (addLineBtn) addLineBtn.addEventListener("click", () => { state.items.push(newLineItem()); saveDraft(); render(); });
+
+  const saveDocBtn = document.querySelector('[data-action="save-doc"]');
+  if (saveDocBtn) saveDocBtn.addEventListener("click", saveDocument);
+
+  const clearBtn = document.querySelector('[data-action="clear"]');
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    if (confirm("入力内容をすべてクリアして新規作成します(会社情報は残ります)。よろしいですか?")) {
+      state = Object.assign({}, state, {
+        editingDocId: null,
+        docNumber: "", docDate: todayStr(),
+        clientName: "", clientHonorific: "様", clientPostal: "", clientAddress: "", clientTel: "", clientFax: "",
+        siteName: "",
+        miscExpense: "", miscNote: "", eightPercentAmount: "", items: [newLineItem()],
+      });
+      saveDraft();
+      render();
+    }
+  });
+
+  const printBtn = document.querySelector('[data-action="print"]');
+  if (printBtn) printBtn.addEventListener("click", () => { preparePrint(); window.print(); });
+}
+
+function preparePrint() {
+  document.querySelectorAll("#app select").forEach((sel) => {
+    const existing = sel.nextElementSibling;
+    if (existing && (existing.classList.contains("print-select-value") || existing.classList.contains("print-input-value"))) {
+      existing.remove();
+    }
+    // 印刷では表示しないプルダウン(会社プリセット選択、宛先敬称)は
+    // 別枠で処理するため、ここではテキスト置換を作らない
+    if (sel.classList.contains("no-print") || sel.id === "client-honorific-input") return;
+    const span = document.createElement("span");
+    span.className = "print-select-value";
+    const opt = sel.options[sel.selectedIndex];
+    span.textContent = opt ? opt.text : "";
+    sel.insertAdjacentElement("afterend", span);
+  });
+
+  // 宛先の会社名＋様/御中を1つのテキストにまとめて印刷表示(レイアウト崩れ防止)
+  const clientNameInput = document.getElementById("client-name-input");
+  const honorificSelect = document.getElementById("client-honorific-input");
+  if (clientNameInput && honorificSelect) {
+    const existingCombo = clientNameInput.nextElementSibling;
+    if (existingCombo && existingCombo.classList.contains("print-input-value")) existingCombo.remove();
+    const combo = document.createElement("span");
+    combo.className = "print-input-value";
+    combo.textContent = clientNameInput.value + (honorificSelect.value ? "　" + honorificSelect.value : "");
+    clientNameInput.insertAdjacentElement("afterend", combo);
+  }
+}
+
+loadDraft();
+render();
+</script>
+</body>
+</html>
