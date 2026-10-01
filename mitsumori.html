@@ -163,6 +163,10 @@
   .doc-row .doc-row-actions button { font-size: 16px; }
   .client-group { padding: 12px 16px; margin-bottom: 12px; }
   .client-group h3 { font-size: 14px; margin: 0 0 2px; }
+  .pay-badge { border: none; border-radius: 12px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .pay-badge.paid { background: #dcfce7; color: #16a34a; }
+  .pay-badge.unpaid { background: #fee2e2; color: #dc2626; }
+  .sum-table tfoot td { font-weight: 700; background: #f5f5f4; }
 
   .print-select-value, .print-input-value { display: none; }
   @media print {
@@ -213,6 +217,7 @@
     .del-btn, .add-line-btn { display: none !important; }
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="wrap" id="app"></div>
@@ -358,6 +363,8 @@ let state = {
 
   // 会社ごとの締め日・支払い日設定 { 会社名: { closingDay, paymentDay } }
   clientSettings: {},
+  // 集計タブで締め日・支払い日を編集中の会社名(空なら編集中なし)
+  editingClientSetting: "",
 };
 
 function loadDraft() {
@@ -502,8 +509,14 @@ async function saveDocument() {
   }
   const record = docToRecord();
   const idx = state.documents.findIndex((d) => d.id === record.id);
-  if (idx !== -1) state.documents[idx] = record;
-  else state.documents.push(record);
+  if (idx !== -1) {
+    // 既存書類を上書き保存するときは、入金済み/未入金のフラグはそのまま引き継ぐ
+    record.paid = state.documents[idx].paid || false;
+    state.documents[idx] = record;
+  } else {
+    record.paid = false;
+    state.documents.push(record);
+  }
   state.editingDocId = record.id;
   saveDraft();
   render();
@@ -548,6 +561,15 @@ function openDocument(id) {
   render();
 }
 
+async function togglePaid(id) {
+  const doc = state.documents.find((d) => d.id === id);
+  if (!doc) return;
+  doc.paid = !doc.paid;
+  saveDraft();
+  render();
+  if (API_URL) await saveDocumentsToCloud();
+}
+
 async function deleteDocument(id) {
   const doc = state.documents.find((d) => d.id === id);
   if (!doc) return;
@@ -570,20 +592,54 @@ function buildCompanySummary(year) {
     const y = (doc.docDate || "").slice(0, 4);
     if (year !== "all" && y !== year) return;
     const key = doc.clientName && doc.clientName.trim() ? doc.clientName : "(未設定)";
-    if (!map[key]) map[key] = { estimateTotal: 0, invoiceTotal: 0, count: 0, months: {} };
+    if (!map[key]) map[key] = { estimateTotal: 0, invoiceTotal: 0, unpaidInvoiceTotal: 0, count: 0, months: {} };
     const g = map[key];
     g.count++;
     const amt = doc.grandTotal || 0;
-    if (doc.docType === "見積書") g.estimateTotal += amt;
-    else g.invoiceTotal += amt;
+    if (doc.docType === "見積書") {
+      g.estimateTotal += amt;
+    } else {
+      g.invoiceTotal += amt;
+      if (!doc.paid) g.unpaidInvoiceTotal += amt;
+    }
     const m = parseInt((doc.docDate || "").slice(5, 7), 10);
     if (m) {
-      if (!g.months[m]) g.months[m] = { estimateTotal: 0, invoiceTotal: 0 };
-      if (doc.docType === "見積書") g.months[m].estimateTotal += amt;
-      else g.months[m].invoiceTotal += amt;
+      if (!g.months[m]) g.months[m] = { estimateTotal: 0, invoiceTotal: 0, unpaidTotal: 0 };
+      if (doc.docType === "見積書") {
+        g.months[m].estimateTotal += amt;
+      } else {
+        g.months[m].invoiceTotal += amt;
+        if (!doc.paid) g.months[m].unpaidTotal += amt;
+      }
     }
   });
   return map;
+}
+
+// 全社合計(会社を分けず、月別・年間で合計する)
+function buildOverallMonthly(year) {
+  const months = {};
+  let yearEstimate = 0, yearInvoice = 0, yearUnpaid = 0;
+  state.documents.forEach((doc) => {
+    const y = (doc.docDate || "").slice(0, 4);
+    if (y !== year) return;
+    const m = parseInt((doc.docDate || "").slice(5, 7), 10);
+    if (!m) return;
+    if (!months[m]) months[m] = { estimateTotal: 0, invoiceTotal: 0, unpaidTotal: 0 };
+    const amt = doc.grandTotal || 0;
+    if (doc.docType === "見積書") {
+      months[m].estimateTotal += amt;
+      yearEstimate += amt;
+    } else {
+      months[m].invoiceTotal += amt;
+      yearInvoice += amt;
+      if (!doc.paid) {
+        months[m].unpaidTotal += amt;
+        yearUnpaid += amt;
+      }
+    }
+  });
+  return { months, yearEstimate, yearInvoice, yearUnpaid };
 }
 
 function getAvailableYears() {
@@ -591,6 +647,11 @@ function getAvailableYears() {
   state.documents.forEach((d) => { if (d.docDate) years.add(d.docDate.slice(0, 4)); });
   years.add(String(new Date().getFullYear()));
   return Array.from(years).sort().reverse();
+}
+
+function getCurrentSummaryYear() {
+  const years = getAvailableYears();
+  return years.indexOf(state.summaryYear) !== -1 ? state.summaryYear : years[0];
 }
 
 // 過去に保存した見積書・請求書から宛先(会社)情報を集めて予測変換候補にする
@@ -680,6 +741,7 @@ function renderDocRow(doc) {
         <div class="doc-row-sub">📅 ${esc(doc.docDate || "")}${doc.siteName ? " ・ 📍 " + esc(doc.siteName) : ""}</div>
       </div>
       <div class="doc-row-amount">${esc(fmtYen(doc.grandTotal))}</div>
+      ${doc.docType === "請求書" ? `<button class="pay-badge no-print ${doc.paid ? "paid" : "unpaid"}" data-action="toggle-paid" data-id="${doc.id}">${doc.paid ? "入金済み" : "未入金"}</button>` : ""}
       <div class="doc-row-actions no-print">
         <button class="del-btn" data-action="open-doc" data-id="${doc.id}" title="開く・編集">✏️</button>
         <button class="del-btn" data-action="delete-doc" data-id="${doc.id}" title="削除">🗑</button>
@@ -734,6 +796,7 @@ function renderClientMonthly(year, client, data) {
       <td>${m}月</td>
       <td class="num">${esc(fmtYen(md.estimateTotal))}</td>
       <td class="num">${esc(fmtYen(md.invoiceTotal))}</td>
+      <td class="num" style="${md.unpaidTotal > 0 ? "color:#dc2626;font-weight:700;" : ""}">${esc(fmtYen(md.unpaidTotal))}</td>
     </tr>`;
   }
   const docs = state.documents
@@ -742,11 +805,52 @@ function renderClientMonthly(year, client, data) {
 
   return `
     <table class="sum-table" style="margin-bottom:14px;">
-      <thead><tr><th>月</th><th class="num">見積合計</th><th class="num">請求合計</th></tr></thead>
-      <tbody>${monthRows || `<tr><td colspan="3" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}</tbody>
+      <thead><tr><th>月</th><th class="num">見積合計</th><th class="num">請求合計</th><th class="num">未入金</th></tr></thead>
+      <tbody>${monthRows || `<tr><td colspan="4" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}</tbody>
+      <tfoot><tr>
+        <td>年間合計</td>
+        <td class="num">${esc(fmtYen(data.estimateTotal))}</td>
+        <td class="num">${esc(fmtYen(data.invoiceTotal))}</td>
+        <td class="num" style="${data.unpaidInvoiceTotal > 0 ? "color:#dc2626;" : ""}">${esc(fmtYen(data.unpaidInvoiceTotal))}</td>
+      </tr></tfoot>
     </table>
     <div>${docs.map((d) => renderDocRow(d)).join("") || ""}</div>
   `;
+}
+
+function renderOverallMonthly(year) {
+  const data = buildOverallMonthly(year);
+  let rows = "";
+  for (let m = 1; m <= 12; m++) {
+    const md = data.months[m];
+    if (!md) continue;
+    rows += `<tr>
+      <td>${m}月</td>
+      <td class="num">${esc(fmtYen(md.estimateTotal))}</td>
+      <td class="num">${esc(fmtYen(md.invoiceTotal))}</td>
+      <td class="num" style="${md.unpaidTotal > 0 ? "color:#dc2626;font-weight:700;" : ""}">${esc(fmtYen(md.unpaidTotal))}</td>
+    </tr>`;
+  }
+  return `
+    <table class="sum-table">
+      <thead><tr><th>月</th><th class="num">見積合計</th><th class="num">請求合計</th><th class="num">未入金</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}</tbody>
+      <tfoot><tr>
+        <td>年間合計</td>
+        <td class="num">${esc(fmtYen(data.yearEstimate))}</td>
+        <td class="num">${esc(fmtYen(data.yearInvoice))}</td>
+        <td class="num" style="${data.yearUnpaid > 0 ? "color:#dc2626;" : ""}">${esc(fmtYen(data.yearUnpaid))}</td>
+      </tr></tfoot>
+    </table>
+  `;
+}
+
+function renderUnpaidList() {
+  const unpaid = state.documents
+    .filter((d) => d.docType === "請求書" && !d.paid)
+    .sort((a, b) => (a.docDate || "").localeCompare(b.docDate || ""));
+  if (!unpaid.length) return `<p class="empty-note">未入金の請求書はありません</p>`;
+  return unpaid.map((d) => renderDocRow(d)).join("");
 }
 
 function getClientSetting(name) {
@@ -781,14 +885,113 @@ function renderClosingDayGroups() {
     </div>`).join("");
 }
 
+/* ===================== Excel / PDF 出力 ===================== */
+
+// Excelのシート名に使えない文字(\ / ? * [ ] :)を置き換え、31文字以内にする
+function sanitizeSheetName(name, used) {
+  let s = String(name == null ? "" : name).replace(/[\\\/\?\*\[\]:]/g, "_").trim();
+  if (!s) s = "会社";
+  if (s.length > 31) s = s.slice(0, 31);
+  let base = s;
+  let i = 2;
+  while (used.has(s)) {
+    const suffix = "_" + i;
+    s = base.slice(0, 31 - suffix.length) + suffix;
+    i++;
+  }
+  used.add(s);
+  return s;
+}
+
+function exportSummaryExcel() {
+  if (typeof XLSX === "undefined") {
+    alert("Excel出力の準備ができていません。インターネットに接続した状態で、もう一度お試しください。");
+    return;
+  }
+  const year = getCurrentSummaryYear();
+  const summary = buildCompanySummary(year);
+  const companies = Object.keys(summary).sort();
+  const usedNames = new Set();
+  const wb = XLSX.utils.book_new();
+
+  // 年間・会社別集計
+  const companyRows = [["会社名", "件数", "見積合計", "請求合計", "未入金", "締め日", "支払い日"]];
+  companies.forEach((c) => {
+    const s = summary[c];
+    const cs = getClientSetting(c);
+    companyRows.push([c, s.count, s.estimateTotal, s.invoiceTotal, s.unpaidInvoiceTotal, cs.closingDay || "", cs.paymentDay || ""]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(companyRows), sanitizeSheetName("会社別集計", usedNames));
+
+  // 全社合計(月別)
+  const overall = buildOverallMonthly(year);
+  const overallRows = [["月", "見積合計", "請求合計", "未入金"]];
+  for (let m = 1; m <= 12; m++) {
+    const md = overall.months[m] || { estimateTotal: 0, invoiceTotal: 0, unpaidTotal: 0 };
+    overallRows.push([m + "月", md.estimateTotal, md.invoiceTotal, md.unpaidTotal]);
+  }
+  overallRows.push(["年間合計", overall.yearEstimate, overall.yearInvoice, overall.yearUnpaid]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(overallRows), sanitizeSheetName("全社合計(月別)", usedNames));
+
+  // 未入金の請求書
+  const unpaidRows = [["種別", "No.", "日付", "現場名", "会社名", "金額"]];
+  state.documents
+    .filter((d) => d.docType === "請求書" && !d.paid)
+    .sort((a, b) => (a.docDate || "").localeCompare(b.docDate || ""))
+    .forEach((d) => {
+      unpaidRows.push([d.docType, d.docNumber || "", d.docDate || "", d.siteName || "", d.clientName || "", d.grandTotal || 0]);
+    });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(unpaidRows), sanitizeSheetName("未入金請求書", usedNames));
+
+  // 会社ごとの月別明細・書類一覧
+  companies.forEach((c) => {
+    const data = summary[c];
+    const rows = [["月", "見積合計", "請求合計", "未入金"]];
+    for (let m = 1; m <= 12; m++) {
+      const md = data.months[m];
+      if (!md) continue;
+      rows.push([m + "月", md.estimateTotal, md.invoiceTotal, md.unpaidTotal]);
+    }
+    rows.push(["年間合計", data.estimateTotal, data.invoiceTotal, data.unpaidInvoiceTotal]);
+    rows.push([]);
+    rows.push(["書類一覧"]);
+    rows.push(["種別", "No.", "日付", "現場名", "金額", "入金状況"]);
+    state.documents
+      .filter((d) => (d.clientName && d.clientName.trim() ? d.clientName : "(未設定)") === c && (d.docDate || "").slice(0, 4) === year)
+      .sort((a, b) => (b.docDate || "").localeCompare(a.docDate || ""))
+      .forEach((d) => {
+        rows.push([d.docType, d.docNumber || "", d.docDate || "", d.siteName || "", d.grandTotal || 0, d.docType === "請求書" ? (d.paid ? "入金済み" : "未入金") : ""]);
+      });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sanitizeSheetName(c, usedNames));
+  });
+
+  XLSX.writeFile(wb, `売上集計_${year}年.xlsx`);
+}
+
+function exportSummaryPDF() {
+  preparePrint();
+  window.print();
+}
+
 function renderSummaryTab() {
   const years = getAvailableYears();
-  const year = years.indexOf(state.summaryYear) !== -1 ? state.summaryYear : years[0];
+  const year = getCurrentSummaryYear();
   const summary = buildCompanySummary(year);
   const companies = Object.keys(summary).sort();
   const selectedClient = companies.indexOf(state.summaryClient) !== -1 ? state.summaryClient : (companies[0] || "");
 
   return `
+    <div class="card section-card no-print">
+      <div class="section-head">
+        <h2>データ出力</h2>
+      </div>
+      <p style="font-size:12px;color:#78716c;margin:0 0 10px;">${esc(year)}年の集計データ(会社別・月別・未入金一覧)をまとめて出力します。</p>
+      <div class="btn-row" style="margin-top:0;">
+        <button class="btn-primary" data-action="export-excel">📊 Excelで出力</button>
+        <button class="btn-secondary" data-action="export-pdf">🖨 PDFで出力</button>
+      </div>
+    </div>
+
     <div class="card section-card">
       <div class="section-head">
         <h2>年間・会社別集計</h2>
@@ -797,21 +1000,50 @@ function renderSummaryTab() {
         </select>
       </div>
       <div style="overflow-x:auto;">
-      <table class="sum-table" style="min-width:560px;">
-        <thead><tr><th>会社名</th><th class="num">件数</th><th class="num">見積合計</th><th class="num">請求合計</th><th>締め日</th><th>支払い日</th></tr></thead>
+      <table class="sum-table" style="min-width:640px;">
+        <thead><tr><th>会社名</th><th class="num">件数</th><th class="num">見積合計</th><th class="num">請求合計</th><th class="num">未入金</th><th>締め日</th><th>支払い日</th><th class="no-print" style="width:60px;"></th></tr></thead>
         <tbody>
-          ${companies.length ? companies.map((c) => `
+          ${companies.length ? companies.map((c) => {
+            const cs = getClientSetting(c);
+            const isEditing = state.editingClientSetting === c;
+            return `
             <tr>
               <td>${esc(c)}</td>
               <td class="num">${summary[c].count}</td>
               <td class="num">${esc(fmtYen(summary[c].estimateTotal))}</td>
               <td class="num">${esc(fmtYen(summary[c].invoiceTotal))}</td>
-              <td><input type="text" data-client="${esc(c)}" data-field="closingDay" placeholder="例: 20/末日" value="${esc(getClientSetting(c).closingDay)}" style="width:70px;font-size:12px;" /></td>
-              <td><input type="text" data-client="${esc(c)}" data-field="paymentDay" placeholder="例: 月末/15" value="${esc(getClientSetting(c).paymentDay)}" style="width:80px;font-size:12px;" /></td>
-            </tr>`).join("") : `<tr><td colspan="6" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}
+              <td class="num" style="${summary[c].unpaidInvoiceTotal > 0 ? "color:#dc2626;font-weight:700;" : ""}">${esc(fmtYen(summary[c].unpaidInvoiceTotal))}</td>
+              ${isEditing ? `
+                <td><input type="text" data-client="${esc(c)}" data-field="closingDay" placeholder="例: 20/末日" value="${esc(cs.closingDay)}" style="width:70px;font-size:12px;" /></td>
+                <td><input type="text" data-client="${esc(c)}" data-field="paymentDay" placeholder="例: 月末/15" value="${esc(cs.paymentDay)}" style="width:80px;font-size:12px;" /></td>
+                <td class="no-print"><button class="del-btn" data-action="finish-client-setting" data-client="${esc(c)}" title="完了">✅</button></td>
+              ` : `
+                <td>${esc(cs.closingDay) || `<span style="color:#a8a29e;">未設定</span>`}</td>
+                <td>${esc(cs.paymentDay) || `<span style="color:#a8a29e;">未設定</span>`}</td>
+                <td class="no-print" style="white-space:nowrap;">
+                  <button class="del-btn" data-action="edit-client-setting" data-client="${esc(c)}" title="編集">✏️</button>
+                  <button class="del-btn" data-action="delete-client-setting" data-client="${esc(c)}" title="削除">🗑</button>
+                </td>
+              `}
+            </tr>`;
+          }).join("") : `<tr><td colspan="8" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}
         </tbody>
       </table>
       </div>
+    </div>
+
+    <div class="card section-card">
+      <div class="section-head">
+        <h2>全社合計(月別)</h2>
+      </div>
+      ${renderOverallMonthly(year)}
+    </div>
+
+    <div class="card section-card">
+      <div class="section-head">
+        <h2>未入金の請求書</h2>
+      </div>
+      ${renderUnpaidList()}
     </div>
 
     <div class="card section-card">
@@ -1106,6 +1338,9 @@ function bindDocRowEvents(root) {
   scope.querySelectorAll('[data-action="delete-doc"]').forEach((btn) => {
     btn.addEventListener("click", () => deleteDocument(btn.dataset.id));
   });
+  scope.querySelectorAll('[data-action="toggle-paid"]').forEach((btn) => {
+    btn.addEventListener("click", () => togglePaid(btn.dataset.id));
+  });
 }
 
 function bindEvents() {
@@ -1165,6 +1400,12 @@ function bindEvents() {
     render();
   });
 
+  const exportExcelBtn = document.querySelector('[data-action="export-excel"]');
+  if (exportExcelBtn) exportExcelBtn.addEventListener("click", exportSummaryExcel);
+
+  const exportPdfBtn = document.querySelector('[data-action="export-pdf"]');
+  if (exportPdfBtn) exportPdfBtn.addEventListener("click", exportSummaryPDF);
+
   // 会社ごとの締め日・支払い日
   document.querySelectorAll('[data-client][data-field="closingDay"], [data-client][data-field="paymentDay"]').forEach((el) => {
     el.addEventListener("input", (e) => {
@@ -1174,7 +1415,31 @@ function bindEvents() {
       state.clientSettings[client][field] = e.target.value;
       saveDraft();
     });
-    el.addEventListener("blur", async () => {
+  });
+
+  document.querySelectorAll('[data-action="edit-client-setting"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingClientSetting = btn.dataset.client;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-action="finish-client-setting"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      state.editingClientSetting = "";
+      saveDraft();
+      render();
+      if (API_URL) await saveDocumentsToCloud();
+    });
+  });
+
+  document.querySelectorAll('[data-action="delete-client-setting"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const client = btn.dataset.client;
+      if (!confirm(client + " の締め日・支払い日の設定を削除します。よろしいですか?")) return;
+      delete state.clientSettings[client];
+      if (state.editingClientSetting === client) state.editingClientSetting = "";
+      saveDraft();
       render();
       if (API_URL) await saveDocumentsToCloud();
     });
