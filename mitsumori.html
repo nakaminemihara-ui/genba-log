@@ -1708,4 +1708,27 @@ function preparePrint() {
   // 宛先の会社名＋様/御中を1つのテキストにまとめて印刷表示(レイアウト崩れ防止)
   const clientNameInput = document.getElementById("client-name-input");
   const honorificSelect = document.getElementById("client-honorific-input");
-  if (cli
+  if (clientNameInput && honorificSelect) {
+    const existingCombo = clientNameInput.nextElementSibling;
+    if (existingCombo && existingCombo.classList.contains("print-input-value")) existingCombo.remove();
+    const combo = document.createElement("span");
+    combo.className = "print-input-value";
+    combo.textContent = clientNameInput.value + (honorificSelect.value ? "　" + honorificSelect.value : "");
+    clientNameInput.insertAdjacentElement("afterend", combo);
+  }
+}
+
+(async () => {
+  loadDraft();
+  if (API_URL) {
+    await loadDocumentsFromCloud(true);
+  }
+  // 新規書類でまだ番号が入っていなければ、連番を自動で入れる
+  if (!state.editingDocId && !state.docNumber.trim()) {
+    state.docNumber = getNextDocNumber(state.docType);
+  }
+  render();
+})();
+</script>
+</body>
+</html>
