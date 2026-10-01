@@ -261,11 +261,25 @@ const CORE_PRICE_TABLE_DP = {
   ],
 };
 
-function lookupCorePrice(diameter, depth, coreType) {
+// 作業内容ごとに、サイズ入力(Φ×厚)欄を出す対象かどうか
+const CORE_SIZE_WORKS = ["コア抜き", "DPコア抜き", "フェローデッキコア抜き", "DP＋RCコア抜き"];
+function hasCoreSize(work) {
+  return CORE_SIZE_WORKS.indexOf(work) !== -1;
+}
+
+// 作業内容ごとに、自動単価表があるかどうか(ある場合のみ自動計算・範囲外表示を行う)
+function coreTableForWork(work) {
+  if (work === "コア抜き") return CORE_PRICE_TABLE;
+  if (work === "DPコア抜き") return CORE_PRICE_TABLE_DP;
+  return null; // フェローデッキコア抜き・DP＋RCコア抜きは単価表がないため手入力
+}
+
+function lookupCorePrice(diameter, depth, work) {
   const d = parseFloat(diameter);
   const l = parseFloat(depth);
   if (isNaN(d) || isNaN(l) || d < 32 || d > 310 || l <= 0 || l > 500) return null;
-  const table = coreType === "DP" ? CORE_PRICE_TABLE_DP : CORE_PRICE_TABLE;
+  const table = coreTableForWork(work);
+  if (!table) return null;
   const row = table.rows.find((r) => d <= r.maxDia);
   if (!row) return null;
   const colIdx = table.depthCols.findIndex((c) => l <= c);
@@ -294,7 +308,7 @@ const ISSUER_PRESETS = {
   },
 };
 
-const WORK_TYPES = ["はつり", "コア抜き", "雑工", "自由入力", "見出し行"];
+const WORK_TYPES = ["斫り", "コア抜き", "DPコア抜き", "フェローデッキコア抜き", "DP＋RCコア抜き", "現場調査費", "レントゲン", "鉄筋探査費", "自由入力", "見出し行"];
 const UNITS = ["本", "式", "人", "人工", "相番", "m2", "m"];
 const STORAGE_KEY = "mitsumori-draft-v2";
 
@@ -329,6 +343,7 @@ let state = {
   docType: "見積書",
   docNumber: "",
   docDate: todayStr(),
+  workDate: "",
 
   issuerPreset: "ナカミネ",
   issuerName: "株式会社ナカミネ",
@@ -477,6 +492,7 @@ function docToRecord() {
     docType: state.docType,
     docNumber: state.docNumber,
     docDate: state.docDate,
+    workDate: state.workDate,
     issuerPreset: state.issuerPreset,
     issuerName: state.issuerName,
     issuerPostal: state.issuerPostal,
@@ -537,6 +553,7 @@ function openDocument(id) {
   state.docType = doc.docType;
   state.docNumber = doc.docNumber;
   state.docDate = doc.docDate;
+  state.workDate = doc.workDate || "";
   state.issuerPreset = doc.issuerPreset;
   state.issuerName = doc.issuerName;
   state.issuerPostal = doc.issuerPostal;
@@ -738,7 +755,7 @@ function renderDocRow(doc) {
     <div class="doc-row">
       <div class="doc-row-info">
         <div class="doc-row-title">${esc(doc.docType)}${doc.docNumber ? " No." + esc(doc.docNumber) : ""}</div>
-        <div class="doc-row-sub">📅 ${esc(doc.docDate || "")}${doc.siteName ? " ・ 📍 " + esc(doc.siteName) : ""}</div>
+        <div class="doc-row-sub">📅 ${esc(doc.docDate || "")}${doc.workDate ? " ・ 🔧施工日 " + esc(doc.workDate) : ""}${doc.siteName ? " ・ 📍 " + esc(doc.siteName) : ""}</div>
       </div>
       <div class="doc-row-amount">${esc(fmtYen(doc.grandTotal))}</div>
       ${doc.docType === "請求書" ? `<button class="pay-badge no-print ${doc.paid ? "paid" : "unpaid"}" data-action="toggle-paid" data-id="${doc.id}">${doc.paid ? "入金済み" : "未入金"}</button>` : ""}
@@ -934,12 +951,12 @@ function exportSummaryExcel() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(overallRows), sanitizeSheetName("全社合計(月別)", usedNames));
 
   // 未入金の請求書
-  const unpaidRows = [["種別", "No.", "日付", "現場名", "会社名", "金額"]];
+  const unpaidRows = [["種別", "No.", "日付", "施工日", "現場名", "会社名", "金額"]];
   state.documents
     .filter((d) => d.docType === "請求書" && !d.paid)
     .sort((a, b) => (a.docDate || "").localeCompare(b.docDate || ""))
     .forEach((d) => {
-      unpaidRows.push([d.docType, d.docNumber || "", d.docDate || "", d.siteName || "", d.clientName || "", d.grandTotal || 0]);
+      unpaidRows.push([d.docType, d.docNumber || "", d.docDate || "", d.workDate || "", d.siteName || "", d.clientName || "", d.grandTotal || 0]);
     });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(unpaidRows), sanitizeSheetName("未入金請求書", usedNames));
 
@@ -955,12 +972,12 @@ function exportSummaryExcel() {
     rows.push(["年間合計", data.estimateTotal, data.invoiceTotal, data.unpaidInvoiceTotal]);
     rows.push([]);
     rows.push(["書類一覧"]);
-    rows.push(["種別", "No.", "日付", "現場名", "金額", "入金状況"]);
+    rows.push(["種別", "No.", "日付", "施工日", "現場名", "金額", "入金状況"]);
     state.documents
       .filter((d) => (d.clientName && d.clientName.trim() ? d.clientName : "(未設定)") === c && (d.docDate || "").slice(0, 4) === year)
       .sort((a, b) => (b.docDate || "").localeCompare(a.docDate || ""))
       .forEach((d) => {
-        rows.push([d.docType, d.docNumber || "", d.docDate || "", d.siteName || "", d.grandTotal || 0, d.docType === "請求書" ? (d.paid ? "入金済み" : "未入金") : ""]);
+        rows.push([d.docType, d.docNumber || "", d.docDate || "", d.workDate || "", d.siteName || "", d.grandTotal || 0, d.docType === "請求書" ? (d.paid ? "入金済み" : "未入金") : ""]);
       });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sanitizeSheetName(c, usedNames));
   });
@@ -1133,6 +1150,7 @@ function renderDoc() {
         <div class="doc-meta">
           <div class="row"><label>No.</label><input type="text" id="docnumber-input" placeholder="例: M00068" value="${esc(state.docNumber)}" /></div>
           <div class="row"><label>日付</label><input type="date" id="date-input" value="${esc(state.docDate)}" /></div>
+          <div class="row"><label>施工日</label><input type="date" id="workdate-input" value="${esc(state.workDate)}" /></div>
           <div class="row"><label>登録番号</label><input type="text" id="regno-input" placeholder="T0000000000000" value="${esc(state.issuerRegNo)}" /></div>
         </div>
       </div>
@@ -1278,8 +1296,8 @@ function renderLineRow(it) {
         <td class="col-del no-print"><button class="del-btn" data-action="del-line" data-id="${it.id}">🗑</button></td>
       </tr>`;
   }
-  const isCore = it.work === "コア抜き";
-  const isHatsuri = it.work === "はつり";
+  const isCore = hasCoreSize(it.work);
+  const isHatsuri = it.work === "斫り" || it.work === "はつり";
   const nameField = isCore
     ? `<input type="text" data-li="${it.id}" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
        <div class="core-size-inline">
@@ -1287,7 +1305,7 @@ function renderLineRow(it) {
          <span>×厚</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="depth" value="${esc(it.depth)}" />
          <span>mm</span>
        </div>
-       ${`<p class="price-note" id="price-note-${it.id}">${it.diameter && it.depth && !lookupCorePrice(it.diameter, it.depth, it.coreType) ? "表の範囲外(手入力)" : ""}</p>`}`
+       <p class="price-note" id="price-note-${it.id}">${coreTableForWork(it.work) && it.diameter && it.depth && !lookupCorePrice(it.diameter, it.depth, it.work) ? "表の範囲外(手入力)" : ""}</p>`
     : isHatsuri
     ? `<input type="text" data-li="${it.id}" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
        <div class="core-size-inline">
@@ -1446,7 +1464,7 @@ function bindEvents() {
   });
 
   const simpleFields = {
-    "docnumber-input": "docNumber", "date-input": "docDate",
+    "docnumber-input": "docNumber", "date-input": "docDate", "workdate-input": "workDate",
     "client-postal-input": "clientPostal",
     "client-address-input": "clientAddress", "client-tel-input": "clientTel", "client-fax-input": "clientFax",
     "issuer-name-input": "issuerName", "issuer-postal-input": "issuerPostal",
@@ -1557,8 +1575,8 @@ function bindEvents() {
       if (!item) return;
       item[field] = val;
 
-      if (field === "diameter" || field === "depth" || field === "coreType") {
-        const auto = lookupCorePrice(item.diameter, item.depth, item.coreType);
+      if (field === "diameter" || field === "depth") {
+        const auto = lookupCorePrice(item.diameter, item.depth, item.work);
         if (auto != null) { item.price = String(auto); item.autoPriced = true; }
         else { item.autoPriced = false; }
       }
@@ -1567,16 +1585,22 @@ function bindEvents() {
       saveDraft();
 
       if (field === "work") {
+        // 作業内容を切り替えたとき、サイズ入力済みなら単価表に合わせて再計算する
+        if (hasCoreSize(item.work) && item.diameter && item.depth) {
+          const auto = lookupCorePrice(item.diameter, item.depth, item.work);
+          if (auto != null) { item.price = String(auto); item.autoPriced = true; }
+        }
+        saveDraft();
         render();
         return;
       }
 
-      if (field === "diameter" || field === "depth" || field === "coreType") {
+      if (field === "diameter" || field === "depth") {
         const priceInput = document.querySelector(`[data-li="${id}"][data-field="price"]`);
         if (priceInput) priceInput.value = item.price;
         const noteEl = document.getElementById(`price-note-${id}`);
         if (noteEl) {
-          noteEl.textContent = item.diameter && item.depth && !lookupCorePrice(item.diameter, item.depth, item.coreType)
+          noteEl.textContent = (coreTableForWork(item.work) && item.diameter && item.depth && !lookupCorePrice(item.diameter, item.depth, item.work))
             ? "表の範囲外(手入力)" : "";
         }
         const amountEl = document.getElementById(`amount-${id}`);
@@ -1632,7 +1656,7 @@ function bindEvents() {
     if (confirm("入力内容をすべてクリアして新規作成します(会社情報は残ります)。よろしいですか?")) {
       state = Object.assign({}, state, {
         editingDocId: null,
-        docNumber: getNextDocNumber(state.docType), docDate: todayStr(),
+        docNumber: getNextDocNumber(state.docType), docDate: todayStr(), workDate: "",
         clientName: "", clientHonorific: "様", clientPostal: "", clientAddress: "", clientTel: "", clientFax: "",
         siteName: "",
         miscExpense: "", miscNote: "", eightPercentAmount: "", items: [newLineItem()],
