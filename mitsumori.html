@@ -168,7 +168,7 @@
   .pay-badge.unpaid { background: #fee2e2; color: #dc2626; }
   .sum-table tfoot td { font-weight: 700; background: #f5f5f4; }
 
-  .print-select-value, .print-input-value { display: none; }
+  .print-select-value, .print-input-value, .print-bank-value { display: none; }
   @media print {
     #app select { display: none !important; }
     .print-select-value { display: inline !important; }
@@ -177,6 +177,9 @@
     .print-input-value { display: inline !important; font-size: 13px; font-weight: 700; white-space: nowrap; }
     input::placeholder, textarea::placeholder { color: transparent !important; }
     input[type="date"]::-webkit-calendar-picker-indicator { display: none !important; }
+    /* 振込先は文字数が多く入力欄の幅で切れてしまうため、印刷時は折り返し可能なテキストに差し替える */
+    .bank-line-row input[data-bank-idx] { display: none !important; }
+    .print-bank-value { display: block !important; width: 100%; white-space: normal; word-break: break-all; font-size: 10px; line-height: 1.4; }
   }
   @media print {
     html, body { background: #fff; width: 210mm; }
@@ -1692,30 +1695,17 @@ function preparePrint() {
     sel.insertAdjacentElement("afterend", span);
   });
 
+  // 振込先が長い場合に入力欄の幅で文字が切れてしまうのを防ぐため、折り返し可能なテキストとして印刷表示する
+  document.querySelectorAll('.bank-line-row input[data-bank-idx]').forEach((input) => {
+    const existing = input.nextElementSibling;
+    if (existing && existing.classList.contains("print-bank-value")) existing.remove();
+    const span = document.createElement("span");
+    span.className = "print-bank-value";
+    span.textContent = input.value;
+    input.insertAdjacentElement("afterend", span);
+  });
+
   // 宛先の会社名＋様/御中を1つのテキストにまとめて印刷表示(レイアウト崩れ防止)
   const clientNameInput = document.getElementById("client-name-input");
   const honorificSelect = document.getElementById("client-honorific-input");
-  if (clientNameInput && honorificSelect) {
-    const existingCombo = clientNameInput.nextElementSibling;
-    if (existingCombo && existingCombo.classList.contains("print-input-value")) existingCombo.remove();
-    const combo = document.createElement("span");
-    combo.className = "print-input-value";
-    combo.textContent = clientNameInput.value + (honorificSelect.value ? "　" + honorificSelect.value : "");
-    clientNameInput.insertAdjacentElement("afterend", combo);
-  }
-}
-
-(async () => {
-  loadDraft();
-  if (API_URL) {
-    await loadDocumentsFromCloud(true);
-  }
-  // 新規書類でまだ番号が入っていなければ、連番を自動で入れる
-  if (!state.editingDocId && !state.docNumber.trim()) {
-    state.docNumber = getNextDocNumber(state.docType);
-  }
-  render();
-})();
-</script>
-</body>
-</html>
+  if (cli
