@@ -64,9 +64,13 @@
   #issuer-name-input { font-size: 12.5px; }
   .party-block .name-row select.honorific { width: 70px; flex-shrink: 0; }
   .party-block .sub-row { display: flex; gap: 6px; margin-bottom: 4px; }
-  .party-block .sub-row input.postal { width: 110px; flex-shrink: 0; }
   .party-block .sub-row2 { display: flex; gap: 6px; }
   .party-block .sub-row2 input { font-size: 11px; }
+  .prefix-field { display: flex; align-items: center; gap: 3px; min-width: 0; }
+  .prefix-field.postal-field { width: 120px; flex-shrink: 0; }
+  .prefix-field.tel-fax-field { flex: 1; min-width: 0; }
+  .prefix-field .prefix-label { font-size: 11px; color: #57534e; flex-shrink: 0; white-space: nowrap; }
+  .prefix-field input { flex: 1; min-width: 0; font-size: 11px; }
 
   .site-row { margin-bottom: 14px; }
   .site-row label.sm { font-size: 11px; }
@@ -279,7 +283,7 @@ const ISSUER_PRESETS = {
     issuerPostal: "〒062-0922",
     issuerAddress: "北海道札幌市豊平区中の島2条7丁目2-2 MTビル1F",
     issuerTel: "011-598-1010",
-    issuerFax: "",
+    issuerFax: "011-598-1011",
     issuerRegNo: "T5430001064731",
     bankLines: ["北海道銀行　山鼻支店(店番191)　普)0355898　カ）ジヤストフレンズ"],
   },
@@ -288,6 +292,15 @@ const ISSUER_PRESETS = {
 const WORK_TYPES = ["はつり", "コア抜き", "雑工", "自由入力", "見出し行"];
 const UNITS = ["本", "式", "人", "人工", "相番", "m2", "m"];
 const STORAGE_KEY = "mitsumori-draft-v2";
+
+// ここにApps ScriptのウェブアプリURLを貼り付けると、保存済みの見積書・請求書を
+// 携帯やパソコンなど他の端末・他の人と共有できるようになります。
+// 空のままだと、この端末のブラウザだけに保存されます(共有されません)。
+// ※ 現場記録アプリ(genba-log)のURLとは別の、新しいスプレッドシート用のURLを使ってください。
+const API_URL = "https://script.google.com/macros/s/AKfycbxW4g0adLvD2ysE9Y6bUxWuMsotgAJHkzSVcRm4pb-Z2y_K_qeBicz5HesyJ-btq_4x/exec";
+
+// 同期状態(保存はしない。画面表示のみに使う)
+let syncStatus = { syncing: false, error: false };
 
 function uid() {
   return Date.now().toString() + Math.random().toString(36).slice(2, 7);
@@ -342,6 +355,9 @@ let state = {
   docQuery: "",
   summaryYear: "",
   summaryClient: "",
+
+  // 会社ごとの締め日・支払い日設定 { 会社名: { closingDay, paymentDay } }
+  clientSettings: {},
 };
 
 function loadDraft() {
@@ -356,6 +372,9 @@ function loadDraft() {
         state.bankLines = (preset.bankLines || [""]).slice();
       }
       if (!Array.isArray(state.documents)) state.documents = [];
+      if (!state.clientSettings || typeof state.clientSettings !== "object" || Array.isArray(state.clientSettings)) {
+        state.clientSettings = {};
+      }
       if (!state.tab) state.tab = "作成";
     }
   } catch (e) {}
@@ -433,6 +452,11 @@ function grandTotal() {
   return taxBase() + tax();
 }
 
+// 郵便番号欄は〒マークを別表示するため、値側に含まれる〒は表示用に取り除く
+function stripPostalMark(v) {
+  return String(v == null ? "" : v).replace(/^〒\s*/, "");
+}
+
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -471,7 +495,7 @@ function docToRecord() {
   };
 }
 
-function saveDocument() {
+async function saveDocument() {
   if (!state.clientName.trim()) {
     alert("宛先(会社名)を入力してから保存してください。");
     return;
@@ -483,6 +507,13 @@ function saveDocument() {
   state.editingDocId = record.id;
   saveDraft();
   render();
+  if (API_URL) {
+    const ok = await saveDocumentsToCloud();
+    if (!ok) {
+      alert("この端末には保存しましたが、共有サーバーへの送信に失敗しました。通信状況をご確認のうえ、もう一度保存してください。");
+      return;
+    }
+  }
   alert("保存しました。「一覧」「集計」タブから確認・修正・削除できます。");
 }
 
@@ -517,7 +548,7 @@ function openDocument(id) {
   render();
 }
 
-function deleteDocument(id) {
+async function deleteDocument(id) {
   const doc = state.documents.find((d) => d.id === id);
   if (!doc) return;
   const ok = confirm(
@@ -530,6 +561,7 @@ function deleteDocument(id) {
   if (state.editingDocId === id) state.editingDocId = null;
   saveDraft();
   render();
+  if (API_URL) await saveDocumentsToCloud();
 }
 
 function buildCompanySummary(year) {
@@ -592,6 +624,52 @@ function getNextDocNumber(docType) {
     if (n > max) max = n;
   });
   return String(max + 1);
+}
+
+/* ===================== 共有(クラウド同期)まわり ===================== */
+
+async function loadDocumentsFromCloud(silent) {
+  if (!API_URL) return;
+  if (!silent) { syncStatus.syncing = true; render(); }
+  try {
+    const res = await fetch(API_URL, { cache: "no-store" });
+    const data = await res.json();
+    if (data && Array.isArray(data.documents)) state.documents = data.documents;
+    if (data && data.clientSettings && typeof data.clientSettings === "object" && !Array.isArray(data.clientSettings)) {
+      state.clientSettings = data.clientSettings;
+    }
+    syncStatus.error = false;
+    saveDraft();
+  } catch (e) {
+    console.error("共有データの取得に失敗しました", e);
+    syncStatus.error = true;
+  }
+  syncStatus.syncing = false;
+  render();
+}
+
+async function saveDocumentsToCloud() {
+  if (!API_URL) return true;
+  syncStatus.syncing = true; render();
+  let ok = false;
+  for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        body: JSON.stringify({ documents: state.documents, clientSettings: state.clientSettings }),
+      });
+      const data = await res.json().catch(() => null);
+      ok = !data || data.ok !== false;
+    } catch (e) {
+      console.error("共有データの保存に失敗しました", e);
+      ok = false;
+    }
+    if (!ok && attempt === 0) await new Promise((r) => setTimeout(r, 700));
+  }
+  syncStatus.error = !ok;
+  syncStatus.syncing = false;
+  render();
+  return ok;
 }
 
 function renderDocRow(doc) {
@@ -671,6 +749,38 @@ function renderClientMonthly(year, client, data) {
   `;
 }
 
+function getClientSetting(name) {
+  return state.clientSettings[name] || { closingDay: "", paymentDay: "" };
+}
+
+function renderClosingDayGroups() {
+  const allClients = Object.keys(buildCompanySummary("all"));
+  if (!allClients.length) return `<p class="empty-note">データなし</p>`;
+  const groups = {};
+  allClients.forEach((c) => {
+    const cs = getClientSetting(c);
+    const key = cs.closingDay && cs.closingDay.trim() ? cs.closingDay.trim() : "未設定";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({ name: c, paymentDay: cs.paymentDay || "" });
+  });
+  const keys = Object.keys(groups).sort((a, b) => {
+    if (a === "未設定") return 1;
+    if (b === "未設定") return -1;
+    const na = parseInt(a, 10), nb = parseInt(b, 10);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+  return keys.map((k) => `
+    <div style="margin-bottom:12px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:#292524;">締め日: ${k === "未設定" ? "未設定" : esc(k) + "日"}</div>
+      ${groups[k].map((g) => `
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#57534e;padding:4px 2px;border-bottom:1px solid #f5f5f4;">
+          <span>${esc(g.name)}</span>
+          <span style="color:#78716c;">${g.paymentDay ? "支払い: " + esc(g.paymentDay) : ""}</span>
+        </div>`).join("")}
+    </div>`).join("");
+}
+
 function renderSummaryTab() {
   const years = getAvailableYears();
   const year = years.indexOf(state.summaryYear) !== -1 ? state.summaryYear : years[0];
@@ -686,8 +796,9 @@ function renderSummaryTab() {
           ${years.map((y) => `<option value="${y}" ${y === year ? "selected" : ""}>${y}年</option>`).join("")}
         </select>
       </div>
-      <table class="sum-table">
-        <thead><tr><th>会社名</th><th class="num">件数</th><th class="num">見積合計</th><th class="num">請求合計</th></tr></thead>
+      <div style="overflow-x:auto;">
+      <table class="sum-table" style="min-width:560px;">
+        <thead><tr><th>会社名</th><th class="num">件数</th><th class="num">見積合計</th><th class="num">請求合計</th><th>締め日</th><th>支払い日</th></tr></thead>
         <tbody>
           ${companies.length ? companies.map((c) => `
             <tr>
@@ -695,9 +806,12 @@ function renderSummaryTab() {
               <td class="num">${summary[c].count}</td>
               <td class="num">${esc(fmtYen(summary[c].estimateTotal))}</td>
               <td class="num">${esc(fmtYen(summary[c].invoiceTotal))}</td>
-            </tr>`).join("") : `<tr><td colspan="4" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}
+              <td><input type="text" data-client="${esc(c)}" data-field="closingDay" placeholder="例: 20/末日" value="${esc(getClientSetting(c).closingDay)}" style="width:70px;font-size:12px;" /></td>
+              <td><input type="text" data-client="${esc(c)}" data-field="paymentDay" placeholder="例: 月末/15" value="${esc(getClientSetting(c).paymentDay)}" style="width:80px;font-size:12px;" /></td>
+            </tr>`).join("") : `<tr><td colspan="6" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}
         </tbody>
       </table>
+      </div>
     </div>
 
     <div class="card section-card">
@@ -709,6 +823,13 @@ function renderSummaryTab() {
           </select>` : ""}
       </div>
       ${selectedClient ? renderClientMonthly(year, selectedClient, summary[selectedClient]) : `<p class="empty-note">対象のデータがありません</p>`}
+    </div>
+
+    <div class="card section-card">
+      <div class="section-head">
+        <h2>締め日別 会社一覧</h2>
+      </div>
+      ${renderClosingDayGroups()}
     </div>
   `;
 }
@@ -732,10 +853,26 @@ function render() {
 }
 
 function renderHeader() {
+  let status = "";
+  if (API_URL) {
+    if (syncStatus.syncing) status = `<span style="color:#a8a29e;">同期中…</span>`;
+    else if (syncStatus.error) status = `<span style="color:#dc2626;">同期に失敗しました</span>`;
+    else status = `<span style="color:#16a34a;">共有オンライン</span>`;
+  } else {
+    status = `<span style="color:#a8a29e;">この端末のみに保存(共有未設定)</span>`;
+  }
   return `
     <header class="card no-print">
-      <p class="company">株式会社ナカミネ</p>
-      <h1>見積書・請求書作成</h1>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+        <div>
+          <p class="company">株式会社ナカミネ</p>
+          <h1>見積書・請求書作成</h1>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
+          ${API_URL ? `<button data-action="refresh" style="font-size:11px;background:#fff;border:1px solid #e7e5e4;border-radius:6px;padding:3px 8px;cursor:pointer;">🔄 更新</button>` : ""}
+        </div>
+      </div>
     </header>`;
 }
 
@@ -780,9 +917,17 @@ function renderDoc() {
           <datalist id="client-name-list">
             ${getKnownClients().map((c) => `<option value="${esc(c.name)}"></option>`).join("")}
           </datalist>
-          <div class="sub-row"><input type="text" class="postal" id="client-postal-input" placeholder="〒000-0000" value="${esc(state.clientPostal)}" /></div>
+          <div class="sub-row">
+            <div class="prefix-field postal-field">
+              <span class="prefix-label">〒</span>
+              <input type="text" class="postal" id="client-postal-input" placeholder="000-0000" value="${esc(stripPostalMark(state.clientPostal))}" />
+            </div>
+          </div>
           <div class="sub-row"><input type="text" id="client-address-input" placeholder="住所" value="${esc(state.clientAddress)}" /></div>
-          <div class="sub-row2"><input type="text" id="client-tel-input" placeholder="TEL" value="${esc(state.clientTel)}" /><input type="text" id="client-fax-input" placeholder="FAX" value="${esc(state.clientFax)}" /></div>
+          <div class="sub-row2">
+            <div class="prefix-field tel-fax-field"><span class="prefix-label">TEL</span><input type="text" id="client-tel-input" value="${esc(state.clientTel)}" /></div>
+            <div class="prefix-field tel-fax-field"><span class="prefix-label">FAX</span><input type="text" id="client-fax-input" value="${esc(state.clientFax)}" /></div>
+          </div>
           <p class="greeting">下記の通り${state.docType === "見積書" ? "御見積り" : "御請求"}申し上げます。</p>
         </div>
         <div class="party-block issuer-block">
@@ -793,9 +938,17 @@ function renderDoc() {
           <div class="name-row">
             <input type="text" class="company-name" id="issuer-name-input" value="${esc(state.issuerName)}" />
           </div>
-          <div class="sub-row"><input type="text" class="postal" id="issuer-postal-input" value="${esc(state.issuerPostal)}" /></div>
+          <div class="sub-row">
+            <div class="prefix-field postal-field">
+              <span class="prefix-label">〒</span>
+              <input type="text" class="postal" id="issuer-postal-input" value="${esc(stripPostalMark(state.issuerPostal))}" />
+            </div>
+          </div>
           <div class="sub-row"><input type="text" id="issuer-address-input" value="${esc(state.issuerAddress)}" /></div>
-          <div class="sub-row2"><input type="text" id="issuer-tel-input" placeholder="TEL" value="${esc(state.issuerTel)}" /><input type="text" id="issuer-fax-input" placeholder="FAX" value="${esc(state.issuerFax)}" /></div>
+          <div class="sub-row2">
+            <div class="prefix-field tel-fax-field"><span class="prefix-label">TEL</span><input type="text" id="issuer-tel-input" value="${esc(state.issuerTel)}" /></div>
+            <div class="prefix-field tel-fax-field"><span class="prefix-label">FAX</span><input type="text" id="issuer-fax-input" value="${esc(state.issuerFax)}" /></div>
+          </div>
           ${state.docType === "請求書" ? `
             <div class="bank-box">
               <p class="title">お振込先</p>
@@ -957,8 +1110,18 @@ function bindDocRowEvents(root) {
 
 function bindEvents() {
   document.querySelectorAll('[data-action="main-tab"]').forEach((el) => {
-    el.addEventListener("click", () => { state.tab = el.dataset.val; saveDraft(); render(); });
+    el.addEventListener("click", async () => {
+      state.tab = el.dataset.val;
+      saveDraft();
+      render();
+      if ((state.tab === "一覧" || state.tab === "集計") && API_URL) {
+        await loadDocumentsFromCloud(true);
+      }
+    });
   });
+
+  const refreshBtn = document.querySelector('[data-action="refresh"]');
+  if (refreshBtn) refreshBtn.addEventListener("click", async () => { await loadDocumentsFromCloud(); });
 
   document.querySelectorAll('[data-action="doctype"]').forEach((el) => {
     el.addEventListener("click", () => {
@@ -1002,6 +1165,21 @@ function bindEvents() {
     render();
   });
 
+  // 会社ごとの締め日・支払い日
+  document.querySelectorAll('[data-client][data-field="closingDay"], [data-client][data-field="paymentDay"]').forEach((el) => {
+    el.addEventListener("input", (e) => {
+      const client = el.dataset.client;
+      const field = el.dataset.field;
+      if (!state.clientSettings[client]) state.clientSettings[client] = { closingDay: "", paymentDay: "" };
+      state.clientSettings[client][field] = e.target.value;
+      saveDraft();
+    });
+    el.addEventListener("blur", async () => {
+      render();
+      if (API_URL) await saveDocumentsToCloud();
+    });
+  });
+
   const simpleFields = {
     "docnumber-input": "docNumber", "date-input": "docDate",
     "client-postal-input": "clientPostal",
@@ -1025,7 +1203,7 @@ function bindEvents() {
       state.clientName = e.target.value;
       const known = getKnownClients().find((c) => c.name === state.clientName.trim());
       if (known) {
-        state.clientPostal = known.postal;
+        state.clientPostal = stripPostalMark(known.postal);
         state.clientAddress = known.address;
         state.clientTel = known.tel;
         state.clientFax = known.fax;
@@ -1035,7 +1213,7 @@ function bindEvents() {
         const telEl = document.getElementById("client-tel-input");
         const faxEl = document.getElementById("client-fax-input");
         const honEl = document.getElementById("client-honorific-input");
-        if (postalEl) postalEl.value = known.postal;
+        if (postalEl) postalEl.value = state.clientPostal;
         if (addressEl) addressEl.value = known.address;
         if (telEl) telEl.value = known.tel;
         if (faxEl) faxEl.value = known.fax;
@@ -1238,12 +1416,17 @@ function preparePrint() {
   }
 }
 
-loadDraft();
-// 新規書類でまだ番号が入っていなければ、連番を自動で入れる
-if (!state.editingDocId && !state.docNumber.trim()) {
-  state.docNumber = getNextDocNumber(state.docType);
-}
-render();
+(async () => {
+  loadDraft();
+  if (API_URL) {
+    await loadDocumentsFromCloud(true);
+  }
+  // 新規書類でまだ番号が入っていなければ、連番を自動で入れる
+  if (!state.editingDocId && !state.docNumber.trim()) {
+    state.docNumber = getNextDocNumber(state.docType);
+  }
+  render();
+})();
 </script>
 </body>
 </html>
