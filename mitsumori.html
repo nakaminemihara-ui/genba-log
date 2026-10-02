@@ -66,6 +66,28 @@
   .party-block .sub-row { display: flex; gap: 6px; margin-bottom: 4px; }
   .party-block .sub-row2 { display: flex; gap: 6px; }
   .party-block .sub-row2 input { font-size: 11px; }
+
+  .issuer-block { position: relative; }
+  .issuer-stamp {
+    position: absolute;
+    top: -4px;
+    right: 6px;
+    width: 64px;
+    height: 64px;
+    opacity: 0.88;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+  }
+  .issuer-stamp svg { display: block; width: 100%; height: 100%; }
+  .stamp-toggle-row {
+    font-size: 10.5px;
+    color: #78716c;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: -2px 0 6px;
+  }
+  .stamp-toggle-row input { width: auto; margin: 0; }
   .prefix-field { display: flex; align-items: center; gap: 3px; min-width: 0; }
   .prefix-field.postal-field { width: 120px; flex-shrink: 0; }
   .prefix-field.tel-fax-field { flex: 1; min-width: 0; }
@@ -311,6 +333,27 @@ const ISSUER_PRESETS = {
   },
 };
 
+const STAMP_SVGS = {
+  "JFコア工業": `<svg viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+  <rect x="20" y="20" width="260" height="260" fill="none" stroke="#b9141a" stroke-width="14"/>
+  <rect x="40" y="40" width="220" height="220" fill="none" stroke="#b9141a" stroke-width="5"/>
+  <g font-family="'Hiragino Mincho ProN','Yu Mincho','MS PMincho',serif" font-weight="900" font-size="41" fill="#b9141a">
+    <text x="213.3" y="93.9" text-anchor="middle">株</text>
+    <text x="213.3" y="141.4" text-anchor="middle">式</text>
+    <text x="213.3" y="188.9" text-anchor="middle">会</text>
+    <text x="213.3" y="236.4" text-anchor="middle">社</text>
+    <text x="150.0" y="93.9" text-anchor="middle">ジ</text>
+    <text x="150.0" y="141.4" text-anchor="middle">ャ</text>
+    <text x="150.0" y="188.9" text-anchor="middle">ス</text>
+    <text x="150.0" y="236.4" text-anchor="middle">ト</text>
+    <text x="86.7" y="93.9" text-anchor="middle">フ</text>
+    <text x="86.7" y="141.4" text-anchor="middle">レ</text>
+    <text x="86.7" y="188.9" text-anchor="middle">ン</text>
+    <text x="86.7" y="236.4" text-anchor="middle">ズ</text>
+  </g>
+</svg>`,
+};
+
 const WORK_TYPES = ["斫り", "コア抜き", "DPコア抜き", "フェローデッキコア抜き", "DP＋RCコア抜き", "現場調査費", "レントゲン", "鉄筋探査費", "自由入力", "見出し行"];
 const UNITS = ["本", "式", "人", "人工", "相番", "m2", "m"];
 const STORAGE_KEY = "mitsumori-draft-v2";
@@ -341,14 +384,14 @@ function mapGenbaLineItem(it) {
   if (WORK_TYPES.indexOf(work) === -1) work = "自由入力";
   const workCustom = work === "自由入力" ? (it.work || "") : "";
   const noteParts = [];
-  if (it.location) noteParts.push(it.location);
   if (it.haturiLength) noteParts.push("斫り長:" + it.haturiLength);
   if (it.note) noteParts.push(it.note);
   return {
     id: uid(),
     work,
     workCustom,
-    label: "",
+    // 作業伝票の「作業場所」を見積書・請求書の「品名・補足」欄にそのまま反映する
+    label: it.location || "",
     diameter: it.diameter || "",
     depth: it.depth || "",
     coreType: "通常",
@@ -528,6 +571,9 @@ let state = {
   clientSettings: {},
   // 集計タブで締め日・支払い日を編集中の会社名(空なら編集中なし)
   editingClientSetting: "",
+
+  // 電子印鑑を表示するかどうか(発行者にSTAMP_SVGSの印影がある場合のみ使われる)
+  showStamp: true,
 };
 
 function loadDraft() {
@@ -909,9 +955,58 @@ function renderDocRow(doc) {
       ${doc.docType === "請求書" ? `<button class="pay-badge no-print ${doc.paid ? "paid" : "unpaid"}" data-action="toggle-paid" data-id="${doc.id}">${doc.paid ? "入金済み" : "未入金"}</button>` : ""}
       <div class="doc-row-actions no-print">
         <button class="del-btn" data-action="open-doc" data-id="${doc.id}" title="開く・編集">✏️</button>
+        <button class="del-btn" data-action="row-pdf" data-id="${doc.id}" title="PDFで開く・印刷">🖨</button>
+        <button class="del-btn" data-action="row-excel" data-id="${doc.id}" title="エクセルで出力">📊</button>
         <button class="del-btn" data-action="delete-doc" data-id="${doc.id}" title="削除">🗑</button>
       </div>
     </div>`;
+}
+
+// 保存済みの1件を、作成タブを開かずにそのままPDF印刷画面に出す
+function exportDocPdf(id) {
+  openDocument(id);
+  preparePrint();
+  window.print();
+}
+
+// 保存済みの1件をエクセルファイルとして出力する
+function exportDocExcel(id) {
+  if (typeof XLSX === "undefined") {
+    alert("Excel出力の準備ができていません。インターネットに接続した状態で、もう一度お試しください。");
+    return;
+  }
+  const doc = state.documents.find((d) => d.id === id);
+  if (!doc) return;
+
+  const rows = [];
+  rows.push([doc.docType, doc.docNumber ? "No." + doc.docNumber : ""]);
+  rows.push(["日付", doc.docDate || "", "施工日", doc.workDate || ""]);
+  rows.push(["発行者", doc.issuerName || ""]);
+  rows.push(["宛先", (doc.clientName || "") + (doc.clientHonorific || "")]);
+  rows.push(["現場名", doc.siteName || ""]);
+  rows.push([]);
+  rows.push(["作業内容", "品名", "数量", "単位", "単価", "金額", "備考"]);
+  (doc.items || []).forEach((it) => {
+    if (isHeading(it)) {
+      rows.push([it.label || "見出し"]);
+      return;
+    }
+    const work = it.work === "自由入力" ? (it.workCustom || "自由入力") : it.work;
+    rows.push([work, it.label || "", it.qty || "", it.unit || "", toNum(it.price) || 0, lineTotal(it), it.note || ""]);
+  });
+  rows.push([]);
+  rows.push(["小計", doc.subtotal || 0]);
+  rows.push(["消費税", doc.tax || 0]);
+  rows.push([doc.docType === "請求書" ? "今回御請求額" : "合計金額", doc.grandTotal || 0]);
+  if (doc.docType === "請求書") {
+    rows.push(["入金状況", doc.paid ? "入金済み" : "未入金"]);
+  }
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(doc.docType, new Set()));
+  const fname = `${doc.docType}_${doc.docNumber || doc.id}_${doc.clientName || ""}.xlsx`.replace(/[\\/:*?"<>|]/g, "_");
+  XLSX.writeFile(wb, fname);
 }
 
 function renderDocListResults() {
@@ -1333,6 +1428,12 @@ function renderDoc() {
             <option value="ナカミネ" ${state.issuerPreset === "ナカミネ" ? "selected" : ""}>株式会社ナカミネ</option>
             <option value="JFコア工業" ${state.issuerPreset === "JFコア工業" ? "selected" : ""}>JFコア工業　㈱ジャストフレンズ</option>
           </select>
+          ${STAMP_SVGS[state.issuerPreset] ? `
+            <label class="stamp-toggle-row no-print">
+              <input type="checkbox" id="stamp-toggle-input" ${state.showStamp ? "checked" : ""} /> 電子印鑑を表示
+            </label>
+            ${state.showStamp ? `<div class="issuer-stamp">${STAMP_SVGS[state.issuerPreset]}</div>` : ""}
+          ` : ""}
           <div class="name-row">
             <input type="text" class="company-name" id="issuer-name-input" value="${esc(state.issuerName)}" />
           </div>
@@ -1506,6 +1607,12 @@ function bindDocRowEvents(root) {
   });
   scope.querySelectorAll('[data-action="delete-doc"]').forEach((btn) => {
     btn.addEventListener("click", () => deleteDocument(btn.dataset.id));
+  });
+  scope.querySelectorAll('[data-action="row-pdf"]').forEach((btn) => {
+    btn.addEventListener("click", () => exportDocPdf(btn.dataset.id));
+  });
+  scope.querySelectorAll('[data-action="row-excel"]').forEach((btn) => {
+    btn.addEventListener("click", () => exportDocExcel(btn.dataset.id));
   });
   scope.querySelectorAll('[data-action="toggle-paid"]').forEach((btn) => {
     btn.addEventListener("click", () => togglePaid(btn.dataset.id));
@@ -1717,6 +1824,13 @@ function bindEvents() {
   if (issuerPresetEl) issuerPresetEl.addEventListener("change", (e) => {
     state.issuerPreset = e.target.value;
     Object.assign(state, ISSUER_PRESETS[e.target.value]);
+    saveDraft();
+    render();
+  });
+
+  const stampToggleEl = document.getElementById("stamp-toggle-input");
+  if (stampToggleEl) stampToggleEl.addEventListener("change", (e) => {
+    state.showStamp = e.target.checked;
     saveDraft();
     render();
   });
