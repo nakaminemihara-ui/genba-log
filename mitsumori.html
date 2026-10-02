@@ -324,6 +324,151 @@ const API_URL = "https://script.google.com/macros/s/AKfycbxW4g0adLvD2ysE9Y6bUxWu
 // 同期状態(保存はしない。画面表示のみに使う)
 let syncStatus = { syncing: false, error: false };
 
+// 現場記録アプリ(作業伝票)から読み込むためのURL。
+// 発行者(issuerPreset)が「ナカミネ」なら index.html(ナカミネの作業伝票)、
+// 「JFコア工業」なら genba-log-jf.html の共有用URLから読み込みます。
+const GENBA_LOG_API_URLS = {
+  "ナカミネ": "https://script.google.com/macros/s/AKfycbwGNFhuAqrdDYvmJhRyueWSL3VcShs-7JHr6_XapNXDF1PQSOJTlXgpL2wvyHgh67m-/exec",
+  "JFコア工業": "https://script.google.com/macros/s/AKfycbwdG_fFUh6k18f8kpMZvHY4gKBl2z8fwNBWTGilMClQbdvzmQbv4loPcaJsSq2Wcd-a/exec",
+};
+
+// 作業伝票側の古い作業内容名 → 見積書・請求書側の新しい作業内容名
+const GENBA_WORK_TYPE_MAP = { "はつり": "斫り", "雑工": "自由入力" };
+
+// 作業伝票から読み込んだ明細行を、見積書・請求書の明細行の形式に変換する
+function mapGenbaLineItem(it) {
+  let work = GENBA_WORK_TYPE_MAP[it.work] || it.work;
+  if (WORK_TYPES.indexOf(work) === -1) work = "自由入力";
+  const workCustom = work === "自由入力" ? (it.work || "") : "";
+  const noteParts = [];
+  if (it.location) noteParts.push(it.location);
+  if (it.haturiLength) noteParts.push("斫り長:" + it.haturiLength);
+  if (it.note) noteParts.push(it.note);
+  return {
+    id: uid(),
+    work,
+    workCustom,
+    label: "",
+    diameter: it.diameter || "",
+    depth: it.depth || "",
+    coreType: "通常",
+    length: it.length || "",
+    width: it.width || "",
+    qty: it.qty || "1",
+    unit: UNITS.indexOf(it.unit) !== -1 ? it.unit : UNITS[0],
+    price: it.price || "",
+    note: noteParts.join(" "),
+    autoPriced: false,
+  };
+}
+
+// 作業伝票読み込みモーダルの状態(保存はしない。画面表示のみに使う)
+let importModal = { show: false, loading: false, error: "", entries: [], query: "" };
+
+async function openImportModal() {
+  const url = GENBA_LOG_API_URLS[state.issuerPreset];
+  importModal = { show: true, loading: true, error: "", entries: [], query: "" };
+  render();
+  if (!url) {
+    importModal.loading = false;
+    importModal.error = "この発行者には作業伝票アプリの連携先が設定されていません。";
+    render();
+    return;
+  }
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("http " + res.status);
+    const data = await res.json();
+    const entries = Array.isArray(data) ? data : [];
+    entries.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    importModal.entries = entries;
+    importModal.loading = false;
+  } catch (err) {
+    importModal.loading = false;
+    importModal.error = "作業伝票データの読み込みに失敗しました。通信状況を確認してもう一度お試しください。";
+  }
+  render();
+}
+
+function closeImportModal() {
+  importModal = { show: false, loading: false, error: "", entries: [], query: "" };
+  render();
+}
+
+function bindImportEntryButtons() {
+  document.querySelectorAll('[data-action="import-genba-entry"]').forEach((btn) => {
+    btn.addEventListener("click", () => { importGenbaEntry(btn.dataset.id); });
+  });
+}
+
+function importGenbaEntry(entryId) {
+  const entry = importModal.entries.find((e) => e.id === entryId);
+  if (!entry) return;
+  const mapped = (entry.lineItems || []).map(mapGenbaLineItem).filter((it) => it.qty !== "" || it.price !== "" || it.label || it.workCustom);
+  if (mapped.length === 0) mapped.push(newLineItem());
+
+  // 現在の明細が未入力の初期状態(1行だけ・空)なら読み込んだ内容で置き換え、
+  // すでに何か入力されていれば末尾に追加する
+  const first = state.items[0];
+  const isBlankState = state.items.length === 1 && !first.price && !first.label && !first.workCustom &&
+    !first.note && !first.diameter && !first.length && !first.width &&
+    (first.qty === "" || first.qty === "1") && first.work === WORK_TYPES[0];
+  if (isBlankState) {
+    state.items = mapped;
+  } else {
+    state.items = state.items.concat(mapped);
+  }
+
+  if (!state.siteName.trim()) state.siteName = entry.siteName || "";
+  if (!state.workDate) state.workDate = entry.date || "";
+  if (!state.clientName.trim() && entry.clientCompany) state.clientName = entry.clientCompany;
+
+  closeImportModal();
+  saveDraft();
+  render();
+}
+
+function renderImportModal() {
+  if (!importModal.show) return "";
+  const body = renderImportModalListOnly();
+  return `
+    <div class="no-print" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;">
+      <div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e7e5e4;flex-shrink:0;">
+          <p style="font-size:14px;font-weight:600;margin:0;">作業伝票から読み込み (${esc(state.issuerPreset)})</p>
+          <button type="button" data-action="close-import-modal" style="background:none;border:none;font-size:20px;line-height:1;cursor:pointer;color:#78716c;">×</button>
+        </div>
+        <div style="padding:10px 16px;flex-shrink:0;">
+          <input type="text" id="import-search-input" placeholder="現場名・取引先で検索" value="${esc(importModal.query)}" style="width:100%;box-sizing:border-box;font-size:13px;padding:6px 8px;border:1px solid #d6d3d1;border-radius:6px;" />
+        </div>
+        <div id="import-modal-list" style="padding:0 16px 16px;overflow-y:auto;flex:1;">${body}</div>
+      </div>
+    </div>`;
+}
+
+function renderImportModalListOnly() {
+  const q = (importModal.query || "").toLowerCase();
+  const filtered = importModal.entries.filter((e) => {
+    if (!q) return true;
+    return (e.siteName || "").toLowerCase().indexOf(q) !== -1 ||
+      (e.clientCompany || "").toLowerCase().indexOf(q) !== -1;
+  });
+  if (importModal.loading) return `<p style="padding:20px;text-align:center;color:#78716c;">読み込み中…</p>`;
+  if (importModal.error) return `<p style="padding:20px;text-align:center;color:#dc2626;">${esc(importModal.error)}</p>`;
+  if (filtered.length === 0) return `<p style="padding:20px;text-align:center;color:#78716c;">該当する作業伝票の記録がありません。</p>`;
+  return filtered.map((e) => {
+    const workSummary = (e.lineItems || []).map((it) => it.work).filter(Boolean).slice(0, 3).join("・");
+    return `
+      <div style="border:1px solid #e7e5e4;border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:600;">${esc(e.siteName || "(現場名なし)")}</div>
+          <div style="font-size:11.5px;color:#78716c;margin-top:2px;">📅 ${esc(e.date || "")}${e.clientCompany ? " ・ " + esc(e.clientCompany) : ""}${workSummary ? " ・ " + esc(workSummary) : ""}</div>
+        </div>
+        <button type="button" data-action="import-genba-entry" data-id="${esc(e.id)}" style="flex-shrink:0;font-size:12.5px;background:#1c1917;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">取り込む</button>
+      </div>`;
+  }).join("");
+}
+
 function uid() {
   return Date.now().toString() + Math.random().toString(36).slice(2, 7);
 }
@@ -1099,7 +1244,7 @@ function render() {
   } else {
     body = renderDocTypeTabs() + renderDoc();
   }
-  app.innerHTML = renderHeader() + renderMainTabs() + body;
+  app.innerHTML = renderHeader() + renderMainTabs() + body + renderImportModal();
   bindEvents();
   window.scrollTo(0, scrollY);
 }
@@ -1222,9 +1367,12 @@ function renderDoc() {
         <span class="val" id="total-box-val">${esc(fmtYen(grandTotal()))}</span>
       </div>
 
-      <div class="site-row">
-        <label class="sm">現場名</label>
-        <input type="text" id="site-input" placeholder="例: 〇〇マンション新築工事" value="${esc(state.siteName)}" />
+      <div class="site-row" style="display:flex;align-items:flex-end;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <label class="sm">現場名</label>
+          <input type="text" id="site-input" placeholder="例: 〇〇マンション新築工事" value="${esc(state.siteName)}" style="width:100%;box-sizing:border-box;" />
+        </div>
+        ${GENBA_LOG_API_URLS[state.issuerPreset] ? `<button type="button" class="no-print" data-action="import-genba" style="flex-shrink:0;font-size:12px;background:#fff;border:1px solid #d6d3d1;border-radius:6px;padding:7px 10px;cursor:pointer;white-space:nowrap;">📥 作業伝票から読込</button>` : ""}
       </div>
 
       <div class="items-table-wrap">
@@ -1420,6 +1568,25 @@ function bindEvents() {
     saveDraft();
     render();
   });
+
+  // 作業伝票から読み込み
+  const importBtn = document.querySelector('[data-action="import-genba"]');
+  if (importBtn) importBtn.addEventListener("click", () => { openImportModal(); });
+
+  const closeImportBtn = document.querySelector('[data-action="close-import-modal"]');
+  if (closeImportBtn) closeImportBtn.addEventListener("click", () => { closeImportModal(); });
+
+  const importSearchEl = document.getElementById("import-search-input");
+  if (importSearchEl) importSearchEl.addEventListener("input", (e) => {
+    importModal.query = e.target.value;
+    const listEl = document.getElementById("import-modal-list");
+    if (listEl) {
+      listEl.innerHTML = renderImportModalListOnly();
+      bindImportEntryButtons();
+    }
+  });
+
+  bindImportEntryButtons();
 
   const exportExcelBtn = document.querySelector('[data-action="export-excel"]');
   if (exportExcelBtn) exportExcelBtn.addEventListener("click", exportSummaryExcel);
