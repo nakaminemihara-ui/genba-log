@@ -183,12 +183,32 @@
   .doc-row .doc-row-amount { text-align: right; white-space: nowrap; font-weight: 700; }
   .doc-row .doc-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
   .doc-row .doc-row-actions button { font-size: 16px; }
+  @media (max-width: 640px) {
+    .doc-row { flex-wrap: wrap; }
+    .doc-row .doc-row-info { flex: 1 1 100%; }
+    .doc-row .doc-row-amount { flex: 1; text-align: left; }
+    .doc-row .doc-row-actions { margin-left: auto; }
+  }
   .client-group { padding: 12px 16px; margin-bottom: 12px; }
   .client-group h3 { font-size: 14px; margin: 0 0 2px; }
   .pay-badge { border: none; border-radius: 12px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
   .pay-badge.paid { background: #dcfce7; color: #16a34a; }
   .pay-badge.unpaid { background: #fee2e2; color: #dc2626; }
   .sum-table tfoot td { font-weight: 700; background: #f5f5f4; }
+  @media (max-width: 640px) {
+    .sum-table.resp-cards { min-width: 0 !important; display: block; }
+    .sum-table.resp-cards thead { display: none; }
+    .sum-table.resp-cards tbody { display: block; }
+    .sum-table.resp-cards tr { display: block; border: 1px solid #e7e5e4; border-radius: 8px; margin-bottom: 8px; padding: 6px 10px; background: #fff; }
+    .sum-table.resp-cards td { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: none; border-bottom: 1px dashed #f0efee; padding: 5px 0; text-align: right; }
+    .sum-table.resp-cards td:last-child { border-bottom: none; }
+    .sum-table.resp-cards td::before { content: attr(data-label); color: #78716c; font-size: 11px; font-weight: 600; text-align: left; flex-shrink: 0; }
+    .sum-table.resp-cards td.cname { font-weight: 700; font-size: 14px; text-align: left; justify-content: flex-start; }
+    .sum-table.resp-cards td.cname::before { content: none; }
+    .sum-table.resp-cards td.actions { justify-content: flex-end; }
+    .sum-table.resp-cards td.actions::before { content: none; }
+    .sum-table.resp-cards td input { width: 60% !important; }
+  }
 
   .print-select-value, .print-input-value, .print-bank-value { display: none; }
   @media print {
@@ -296,12 +316,16 @@ function hasCoreSize(work) {
 function coreTableForWork(work) {
   if (work === "コア抜き") return CORE_PRICE_TABLE;
   if (work === "DPコア抜き") return CORE_PRICE_TABLE_DP;
-  return null; // フェローデッキコア抜き・DP＋RCコア抜きは単価表がないため手入力
+  if (work === "フェローデッキコア抜き") return CORE_PRICE_TABLE; // 通常コア抜き単価×FELLOW_RATE
+  return null; // DP＋RCコア抜きは単価表がないため手入力
 }
 
+// フェローデッキコア抜きは通常のコア抜き単価の1.3倍
+const FELLOW_RATE = 1.3;
 function lookupCorePrice(diameter, depth, work) {
   const d = parseFloat(diameter);
-  const l = parseFloat(depth);
+  // フェローデッキは厚みに関係なく、通常コア抜きの厚250mmの単価×1.3
+  const l = work === "フェローデッキコア抜き" ? 250 : parseFloat(depth);
   if (isNaN(d) || isNaN(l) || d < 32 || d > 310 || l <= 0 || l > 500) return null;
   const table = coreTableForWork(work);
   if (!table) return null;
@@ -309,7 +333,8 @@ function lookupCorePrice(diameter, depth, work) {
   if (!row) return null;
   const colIdx = table.depthCols.findIndex((c) => l <= c);
   if (colIdx === -1) return null;
-  return row.prices[colIdx];
+  const base = row.prices[colIdx];
+  return work === "フェローデッキコア抜き" ? Math.round(base * FELLOW_RATE) : base;
 }
 
 const ISSUER_PRESETS = {
@@ -772,6 +797,22 @@ function openDocument(id) {
   render();
 }
 
+// 保存済み書類をコピーして、新しい書類(新しいNo.・今日の日付)として編集できるようにする
+function copyDocument(id) {
+  const doc = state.documents.find((d) => d.id === id);
+  if (!doc) return;
+  openDocument(id);
+  state.editingDocId = null;
+  state.docNumber = getNextDocNumber(state.docType);
+  state.docDate = todayStr();
+  state.workDate = "";
+  state.items = state.items.map((it) => Object.assign({}, it, { id: uid() }));
+  saveDraft();
+  render();
+  window.scrollTo(0, 0);
+  alert("コピーしました。内容を直して「保存する」を押すと新しい書類として保存されます。");
+}
+
 async function togglePaid(id) {
   const doc = state.documents.find((d) => d.id === id);
   if (!doc) return;
@@ -887,6 +928,28 @@ function getKnownClients() {
 }
 
 // 見積書/請求書それぞれ、保存済み書類のNo.から次の連番(1,2,3...)を割り出す
+// 入力候補(予測変換): 過去の書類・作業伝票から品名/備考/現場名を集める(新しい順・重複なし)
+function collectSuggestions(kind) {
+  const seen = new Set();
+  const out = [];
+  const add = (v) => {
+    const t = String(v == null ? "" : v).trim();
+    if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+  };
+  state.items.forEach((it) => add(kind === "note" ? it.note : it.label));
+  state.documents.slice().sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || "")).forEach((d) => {
+    if (kind === "site") { add(d.siteName); return; }
+    (d.items || []).forEach((it) => add(kind === "note" ? it.note : it.label));
+  });
+  if (importModal && importModal.entries) {
+    importModal.entries.forEach((e) => {
+      if (kind === "site") add(e.siteName);
+      else if (kind === "label") (e.lineItems || []).forEach((li) => add(li.location));
+    });
+  }
+  return out.slice(0, 200);
+}
+
 function getNextDocNumber(docType) {
   let max = 0;
   state.documents.forEach((d) => {
@@ -955,6 +1018,7 @@ function renderDocRow(doc) {
       ${doc.docType === "請求書" ? `<button class="pay-badge no-print ${doc.paid ? "paid" : "unpaid"}" data-action="toggle-paid" data-id="${doc.id}">${doc.paid ? "入金済み" : "未入金"}</button>` : ""}
       <div class="doc-row-actions no-print">
         <button class="del-btn" data-action="open-doc" data-id="${doc.id}" title="開く・編集">✏️</button>
+        <button class="del-btn" data-action="copy-doc" data-id="${doc.id}" title="コピーして新規作成">📋</button>
         <button class="del-btn" data-action="row-pdf" data-id="${doc.id}" title="PDFで開く・印刷">🖨</button>
         <button class="del-btn" data-action="row-excel" data-id="${doc.id}" title="エクセルで出力">📊</button>
         <button class="del-btn" data-action="delete-doc" data-id="${doc.id}" title="削除">🗑</button>
@@ -1259,8 +1323,8 @@ function renderSummaryTab() {
           ${years.map((y) => `<option value="${y}" ${y === year ? "selected" : ""}>${y}年</option>`).join("")}
         </select>
       </div>
-      <div style="overflow-x:auto;">
-      <table class="sum-table" style="min-width:640px;">
+      <div>
+      <table class="sum-table resp-cards" style="min-width:640px;">
         <thead><tr><th>会社名</th><th class="num">件数</th><th class="num">見積合計</th><th class="num">請求合計</th><th class="num">未入金</th><th>締め日</th><th>支払い日</th><th class="no-print" style="width:60px;"></th></tr></thead>
         <tbody>
           ${companies.length ? companies.map((c) => {
@@ -1268,19 +1332,19 @@ function renderSummaryTab() {
             const isEditing = state.editingClientSetting === c;
             return `
             <tr>
-              <td>${esc(c)}</td>
-              <td class="num">${summary[c].count}</td>
-              <td class="num">${esc(fmtYen(summary[c].estimateTotal))}</td>
-              <td class="num">${esc(fmtYen(summary[c].invoiceTotal))}</td>
-              <td class="num" style="${summary[c].unpaidInvoiceTotal > 0 ? "color:#dc2626;font-weight:700;" : ""}">${esc(fmtYen(summary[c].unpaidInvoiceTotal))}</td>
+              <td class="cname">${esc(c)}</td>
+              <td class="num" data-label="件数">${summary[c].count}</td>
+              <td class="num" data-label="見積合計">${esc(fmtYen(summary[c].estimateTotal))}</td>
+              <td class="num" data-label="請求合計">${esc(fmtYen(summary[c].invoiceTotal))}</td>
+              <td class="num" data-label="未入金" style="${summary[c].unpaidInvoiceTotal > 0 ? "color:#dc2626;font-weight:700;" : ""}">${esc(fmtYen(summary[c].unpaidInvoiceTotal))}</td>
               ${isEditing ? `
-                <td><input type="text" data-client="${esc(c)}" data-field="closingDay" placeholder="例: 20/末日" value="${esc(cs.closingDay)}" style="width:70px;font-size:12px;" /></td>
-                <td><input type="text" data-client="${esc(c)}" data-field="paymentDay" placeholder="例: 月末/15" value="${esc(cs.paymentDay)}" style="width:80px;font-size:12px;" /></td>
-                <td class="no-print"><button class="del-btn" data-action="finish-client-setting" data-client="${esc(c)}" title="完了">✅</button></td>
+                <td data-label="締め日"><input type="text" data-client="${esc(c)}" data-field="closingDay" placeholder="例: 20/末日" value="${esc(cs.closingDay)}" style="width:70px;font-size:12px;" /></td>
+                <td data-label="支払い日"><input type="text" data-client="${esc(c)}" data-field="paymentDay" placeholder="例: 月末/15" value="${esc(cs.paymentDay)}" style="width:80px;font-size:12px;" /></td>
+                <td class="no-print actions"><button class="del-btn" data-action="finish-client-setting" data-client="${esc(c)}" title="完了">✅</button></td>
               ` : `
-                <td>${esc(cs.closingDay) || `<span style="color:#a8a29e;">未設定</span>`}</td>
-                <td>${esc(cs.paymentDay) || `<span style="color:#a8a29e;">未設定</span>`}</td>
-                <td class="no-print" style="white-space:nowrap;">
+                <td data-label="締め日">${esc(cs.closingDay) || `<span style="color:#a8a29e;">未設定</span>`}</td>
+                <td data-label="支払い日">${esc(cs.paymentDay) || `<span style="color:#a8a29e;">未設定</span>`}</td>
+                <td class="no-print actions" style="white-space:nowrap;">
                   <button class="del-btn" data-action="edit-client-setting" data-client="${esc(c)}" title="編集">✏️</button>
                   <button class="del-btn" data-action="delete-client-setting" data-client="${esc(c)}" title="削除">🗑</button>
                 </td>
@@ -1407,6 +1471,9 @@ function renderDoc() {
               <option value="御中" ${state.clientHonorific === "御中" ? "selected" : ""}>御中</option>
             </select>
           </div>
+          <datalist id="label-suggest-list">${collectSuggestions("label").map((v) => `<option value="${esc(v)}"></option>`).join("")}</datalist>
+          <datalist id="note-suggest-list">${collectSuggestions("note").map((v) => `<option value="${esc(v)}"></option>`).join("")}</datalist>
+          <datalist id="site-suggest-list">${collectSuggestions("site").map((v) => `<option value="${esc(v)}"></option>`).join("")}</datalist>
           <datalist id="client-name-list">
             ${getKnownClients().map((c) => `<option value="${esc(c.name)}"></option>`).join("")}
           </datalist>
@@ -1471,7 +1538,7 @@ function renderDoc() {
       <div class="site-row" style="display:flex;align-items:flex-end;gap:8px;">
         <div style="flex:1;min-width:0;">
           <label class="sm">現場名</label>
-          <input type="text" id="site-input" placeholder="例: 〇〇マンション新築工事" value="${esc(state.siteName)}" style="width:100%;box-sizing:border-box;" />
+          <input type="text" id="site-input" list="site-suggest-list" autocomplete="off" placeholder="例: 〇〇マンション新築工事" value="${esc(state.siteName)}" style="width:100%;box-sizing:border-box;" />
         </div>
         ${GENBA_LOG_API_URLS[state.issuerPreset] ? `<button type="button" class="no-print" data-action="import-genba" style="flex-shrink:0;font-size:12px;background:#fff;border:1px solid #d6d3d1;border-radius:6px;padding:7px 10px;cursor:pointer;white-space:nowrap;">📥 作業伝票から読込</button>` : ""}
       </div>
@@ -1539,19 +1606,19 @@ function renderLineRow(it) {
     return `
       <tr class="heading-row" data-row="${it.id}">
         <td class="col-work">${workSelect}</td>
-        <td class="col-name" colspan="1"><input type="text" data-li="${it.id}" data-field="label" placeholder="見出し(例: 5F)" value="${esc(it.label)}" /></td>
+        <td class="col-name" colspan="1"><input type="text" data-li="${it.id}" list="label-suggest-list" autocomplete="off" data-field="label" placeholder="見出し(例: 5F)" value="${esc(it.label)}" /></td>
         <td class="col-qty"></td>
         <td class="col-unit"></td>
         <td class="col-price"></td>
         <td class="col-amount"></td>
-        <td class="col-note"><input type="text" data-li="${it.id}" data-field="note" placeholder="備考" value="${esc(it.note)}" /></td>
+        <td class="col-note"><input type="text" data-li="${it.id}" list="note-suggest-list" autocomplete="off" data-field="note" placeholder="備考" value="${esc(it.note)}" /></td>
         <td class="col-del no-print"><button class="del-btn" data-action="del-line" data-id="${it.id}">🗑</button></td>
       </tr>`;
   }
   const isCore = hasCoreSize(it.work);
   const isHatsuri = it.work === "斫り" || it.work === "はつり";
   const nameField = isCore
-    ? `<input type="text" data-li="${it.id}" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
+    ? `<input type="text" data-li="${it.id}" list="label-suggest-list" autocomplete="off" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
        <div class="core-size-inline">
          <span>Φ</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="diameter" value="${esc(it.diameter)}" />
          <span>×厚</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="depth" value="${esc(it.depth)}" />
@@ -1559,14 +1626,14 @@ function renderLineRow(it) {
        </div>
        <p class="price-note" id="price-note-${it.id}">${coreTableForWork(it.work) && it.diameter && it.depth && !lookupCorePrice(it.diameter, it.depth, it.work) ? "表の範囲外(手入力)" : ""}</p>`
     : isHatsuri
-    ? `<input type="text" data-li="${it.id}" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
+    ? `<input type="text" data-li="${it.id}" list="label-suggest-list" autocomplete="off" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
        <div class="core-size-inline">
          <span>長</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="length" value="${esc(it.length)}" />
          <span>×幅</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="width" value="${esc(it.width)}" />
          <span>×深</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="depth" value="${esc(it.depth)}" />
          <span>mm</span>
        </div>`
-    : `<input type="text" data-li="${it.id}" data-field="label" placeholder="${it.work === "自由入力" ? "品名を入力" : "品名・補足(任意)"}" value="${esc(it.label)}" />`;
+    : `<input type="text" data-li="${it.id}" list="label-suggest-list" autocomplete="off" data-field="label" placeholder="${it.work === "自由入力" ? "品名を入力" : "品名・補足(任意)"}" value="${esc(it.label)}" />`;
 
   return `
     <tr data-row="${it.id}">
@@ -1580,7 +1647,7 @@ function renderLineRow(it) {
       </td>
       <td class="col-price"><input type="text" inputmode="decimal" data-li="${it.id}" data-field="price" value="${esc(it.price)}" /></td>
       <td class="col-amount" id="amount-${it.id}">${it.price ? esc(fmtNum(lineTotal(it))) : ""}</td>
-      <td class="col-note"><input type="text" data-li="${it.id}" data-field="note" placeholder="備考" value="${esc(it.note)}" /></td>
+      <td class="col-note"><input type="text" data-li="${it.id}" list="note-suggest-list" autocomplete="off" data-field="note" placeholder="備考" value="${esc(it.note)}" /></td>
       <td class="col-del no-print"><button class="del-btn" data-action="del-line" data-id="${it.id}">🗑</button></td>
     </tr>`;
 }
@@ -1607,6 +1674,9 @@ function bindDocRowEvents(root) {
   });
   scope.querySelectorAll('[data-action="delete-doc"]').forEach((btn) => {
     btn.addEventListener("click", () => deleteDocument(btn.dataset.id));
+  });
+  scope.querySelectorAll('[data-action="copy-doc"]').forEach((btn) => {
+    btn.addEventListener("click", () => copyDocument(btn.dataset.id));
   });
   scope.querySelectorAll('[data-action="row-pdf"]').forEach((btn) => {
     btn.addEventListener("click", () => exportDocPdf(btn.dataset.id));
@@ -1870,7 +1940,7 @@ function bindEvents() {
 
       if (field === "work") {
         // 作業内容を切り替えたとき、サイズ入力済みなら単価表に合わせて再計算する
-        if (hasCoreSize(item.work) && item.diameter && item.depth) {
+        if (hasCoreSize(item.work) && item.diameter && (item.depth || item.work === "フェローデッキコア抜き")) {
           const auto = lookupCorePrice(item.diameter, item.depth, item.work);
           if (auto != null) { item.price = String(auto); item.autoPriced = true; }
         }
