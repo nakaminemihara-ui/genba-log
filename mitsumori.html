@@ -963,6 +963,37 @@ function getNextDocNumber(docType) {
 
 /* ===================== 共有(クラウド同期)まわり ===================== */
 
+// 既存の書類・入力中の書類のフェローデッキ行に、新しい単価(250mm単価×1.3)を反映する。
+// 単価が空、または自動計算の行だけ書き換える(手で入れた単価はそのまま)。金額の合計も計算し直す。
+function migrateFellowPrices() {
+  let changed = 0;
+  const fixItems = (items) => {
+    let n = 0;
+    (items || []).forEach((it) => {
+      if (it.work !== "フェローデッキコア抜き" || !it.diameter) return;
+      if (String(it.price || "").trim() !== "" && !it.autoPriced) return;
+      const auto = lookupCorePrice(it.diameter, it.depth, it.work);
+      if (auto == null) return;
+      if (String(it.price) !== String(auto) || !it.autoPriced) {
+        it.price = String(auto); it.autoPriced = true; n++;
+      }
+    });
+    return n;
+  };
+  changed += fixItems(state.items);
+  (state.documents || []).forEach((doc) => {
+    if (!fixItems(doc.items)) return;
+    changed++;
+    // 合計の計算は現在の入力内容を使う関数なので、一時的に書類の内容に差し替えて計算する
+    const keep = { items: state.items, miscExpense: state.miscExpense, eightPercentAmount: state.eightPercentAmount };
+    state.items = doc.items; state.miscExpense = doc.miscExpense; state.eightPercentAmount = doc.eightPercentAmount;
+    doc.subtotal = subtotal(); doc.tax = tax(); doc.grandTotal = grandTotal();
+    state.items = keep.items; state.miscExpense = keep.miscExpense; state.eightPercentAmount = keep.eightPercentAmount;
+  });
+  if (changed) saveDraft();
+  return changed;
+}
+
 async function loadDocumentsFromCloud(silent) {
   if (!API_URL) return;
   if (!silent) { syncStatus.syncing = true; render(); }
@@ -975,6 +1006,7 @@ async function loadDocumentsFromCloud(silent) {
     }
     syncStatus.error = false;
     saveDraft();
+    if (migrateFellowPrices()) { syncStatus.syncing = false; render(); await saveDocumentsToCloud(); return; }
   } catch (e) {
     console.error("共有データの取得に失敗しました", e);
     syncStatus.error = true;
@@ -1423,6 +1455,7 @@ function renderHeader() {
         <div>
           <p class="company">株式会社ナカミネ</p>
           <h1>見積書・請求書作成</h1>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-14 c</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
@@ -2071,6 +2104,7 @@ function preparePrint() {
 
 (async () => {
   loadDraft();
+  migrateFellowPrices();
   if (API_URL) {
     await loadDocumentsFromCloud(true);
   }
