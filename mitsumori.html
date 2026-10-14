@@ -262,6 +262,13 @@
     table.items { page-break-inside: auto; }
     table.items tr { page-break-inside: avoid; }
     .del-btn, .add-line-btn { display: none !important; }
+    /* 印刷では罫線が薄く見えないよう、濃い色にする */
+    table.items thead th, table.items td { border: 1px solid #292524 !important; }
+    table.items thead th { background: #e7e5e4 !important; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .party-block { border-bottom: 1.2px solid #44403c; }
+    .totals-row { border-bottom: 1px solid #78716c; }
+    .bank-box { border: 1.2px solid #44403c; }
+    .total-box { border-color: #000 !important; }
   }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -1457,7 +1464,7 @@ function renderHeader() {
         <div>
           <p class="company">株式会社ナカミネ</p>
           <h1>見積書・請求書作成</h1>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-14 d</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-14 e</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
