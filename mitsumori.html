@@ -199,7 +199,7 @@
   @media (max-width: 640px) {
     .sum-table.resp-cards { min-width: 0 !important; display: block; }
     .sum-table.resp-cards thead { display: none; }
-    .sum-table.resp-cards tbody { display: block; }
+    .sum-table.resp-cards tbody, .sum-table.resp-cards tfoot { display: block; }
     .sum-table.resp-cards tr { display: block; border: 1px solid #e7e5e4; border-radius: 8px; margin-bottom: 8px; padding: 6px 10px; background: #fff; }
     .sum-table.resp-cards td { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: none; border-bottom: 1px dashed #f0efee; padding: 5px 0; text-align: right; }
     .sum-table.resp-cards td:last-child { border-bottom: none; }
@@ -211,6 +211,15 @@
     .sum-table.resp-cards td input { width: 60% !important; }
   }
 
+  .cost-box { margin-top: 12px; border: 1px solid #fdba74; background: #fff7ed; border-radius: 8px; padding: 10px 12px; }
+  .cost-box .title { font-size: 12px; font-weight: 700; color: #9a3412; margin: 0 0 8px; }
+  .cost-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .cost-grid label { font-size: 11px; color: #78716c; display: block; }
+  .cost-grid input { width: 100%; box-sizing: border-box; text-align: right; margin-top: 2px; }
+  .cost-sum { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; font-size: 13px; }
+  .cost-sum b { font-variant-numeric: tabular-nums; }
+  .warn-card { border: 1px solid #fca5a5; background: #fef2f2; }
+  .warn-card .warn-title { color: #b91c1c; font-weight: 700; font-size: 14px; margin: 0 0 4px; }
   .print-select-value, .print-input-value, .print-bank-value { display: none; }
   @media print {
     #app select { display: none !important; }
@@ -568,7 +577,10 @@ let state = {
   docType: "見積書",
   docNumber: "",
   docDate: todayStr(),
-  workDate: "",
+  workDate: "",   // 施工日(=完了日)。工事完成基準の売上計上日
+  startDate: "",  // 着工日(任意)
+  // 現場原価(社内用・請求書のみ。印刷しない)
+  costs: { material: "", outsource: "", travel: "", other: "" },
 
   issuerPreset: "ナカミネ",
   issuerName: "株式会社ナカミネ",
@@ -626,6 +638,8 @@ function loadDraft() {
         state.clientSettings = {};
       }
       if (!state.tab) state.tab = "作成";
+      state.costs = normCosts(state.costs);
+      if (state.startDate == null) state.startDate = "";
     }
   } catch (e) {}
 }
@@ -642,7 +656,8 @@ function toNum(v) {
 }
 
 function fmtYen(n) {
-  return "¥" + Math.round(n || 0).toLocaleString();
+  const v = Math.round(n || 0);
+  return (v < 0 ? "-¥" : "¥") + Math.abs(v).toLocaleString();
 }
 
 function fmtNum(n) {
@@ -721,6 +736,8 @@ function docToRecord() {
     docNumber: state.docNumber,
     docDate: state.docDate,
     workDate: state.workDate,
+    startDate: state.startDate,
+    costs: normCosts(state.costs),
     issuerPreset: state.issuerPreset,
     issuerName: state.issuerName,
     issuerPostal: state.issuerPostal,
@@ -750,6 +767,9 @@ async function saveDocument() {
   if (!state.clientName.trim()) {
     alert("宛先(会社名)を入力してから保存してください。");
     return;
+  }
+  if (state.docType === "請求書" && !state.workDate) {
+    if (!confirm("施工日(完了日)が入っていません。\n\n未完成の現場として保存しますか?\n(売上は書類の日付で暫定計上され、集計タブに警告が出ます。完成したら開いて施工日を入れてください)")) return;
   }
   const record = docToRecord();
   const idx = state.documents.findIndex((d) => d.id === record.id);
@@ -782,6 +802,8 @@ function openDocument(id) {
   state.docNumber = doc.docNumber;
   state.docDate = doc.docDate;
   state.workDate = doc.workDate || "";
+  state.startDate = doc.startDate || "";
+  state.costs = normCosts(doc.costs);
   state.issuerPreset = doc.issuerPreset;
   state.issuerName = doc.issuerName;
   state.issuerPostal = doc.issuerPostal;
@@ -815,6 +837,8 @@ function copyDocument(id) {
   state.docNumber = getNextDocNumber(state.docType);
   state.docDate = todayStr();
   state.workDate = "";
+  state.startDate = "";
+  state.costs = normCosts(null);
   state.items = state.items.map((it) => Object.assign({}, it, { id: uid() }));
   saveDraft();
   render();
@@ -847,10 +871,43 @@ async function deleteDocument(id) {
   if (API_URL) await saveDocumentsToCloud();
 }
 
+/* ===================== 工事完成基準まわり ===================== */
+
+// 原価の入力欄(古いデータで欠けていても空として扱う)
+const COST_FIELDS = [
+  { key: "material", label: "材料費" },
+  { key: "outsource", label: "外注費" },
+  { key: "travel", label: "交通費" },
+  { key: "other", label: "その他経費" },
+];
+function normCosts(c) {
+  const out = {};
+  COST_FIELDS.forEach((f) => { out[f.key] = c && c[f.key] != null ? String(c[f.key]) : ""; });
+  return out;
+}
+function costTotalOf(costs) {
+  let t = 0;
+  COST_FIELDS.forEach((f) => { const v = toNum(costs && costs[f.key]); if (!isNaN(v)) t += v; });
+  return t;
+}
+function docCostTotal(doc) { return costTotalOf(doc.costs); }
+// 売上(税抜) = 合計 - 消費税(古いデータにも使える)
+function docSales(doc) { return (doc.grandTotal || 0) - (doc.tax || 0); }
+
+// 売上を計上する日付。請求書は施工日(完了日)、見積書(売上ではない)は従来どおり書類の日付。
+// 請求書で施工日が空のときは、暫定で書類の日付を使う。
+function periodDate(doc) {
+  if (doc.docType === "請求書" && doc.workDate) return doc.workDate;
+  return doc.docDate || "";
+}
+function isWorkDateMissing(doc) {
+  return doc.docType === "請求書" && !doc.workDate;
+}
+
 function buildCompanySummary(year) {
   const map = {};
   state.documents.forEach((doc) => {
-    const y = (doc.docDate || "").slice(0, 4);
+    const y = periodDate(doc).slice(0, 4);
     if (year !== "all" && y !== year) return;
     const key = doc.clientName && doc.clientName.trim() ? doc.clientName : "(未設定)";
     if (!map[key]) map[key] = { estimateTotal: 0, invoiceTotal: 0, unpaidInvoiceTotal: 0, count: 0, months: {} };
@@ -863,7 +920,7 @@ function buildCompanySummary(year) {
       g.invoiceTotal += amt;
       if (!doc.paid) g.unpaidInvoiceTotal += amt;
     }
-    const m = parseInt((doc.docDate || "").slice(5, 7), 10);
+    const m = parseInt(periodDate(doc).slice(5, 7), 10);
     if (m) {
       if (!g.months[m]) g.months[m] = { estimateTotal: 0, invoiceTotal: 0, unpaidTotal: 0 };
       if (doc.docType === "見積書") {
@@ -882,9 +939,9 @@ function buildOverallMonthly(year) {
   const months = {};
   let yearEstimate = 0, yearInvoice = 0, yearUnpaid = 0;
   state.documents.forEach((doc) => {
-    const y = (doc.docDate || "").slice(0, 4);
+    const y = periodDate(doc).slice(0, 4);
     if (y !== year) return;
-    const m = parseInt((doc.docDate || "").slice(5, 7), 10);
+    const m = parseInt(periodDate(doc).slice(5, 7), 10);
     if (!m) return;
     if (!months[m]) months[m] = { estimateTotal: 0, invoiceTotal: 0, unpaidTotal: 0 };
     const amt = doc.grandTotal || 0;
@@ -903,9 +960,44 @@ function buildOverallMonthly(year) {
   return { months, yearEstimate, yearInvoice, yearUnpaid };
 }
 
+// 請求書の 売上(税抜)・原価・粗利 を、施工日(完了日)の月・現場ごとに集計する
+function buildProfitData(year) {
+  const months = {};
+  const sites = {};
+  let sales = 0, cost = 0;
+  state.documents.forEach((doc) => {
+    if (doc.docType !== "請求書") return;
+    const pd = periodDate(doc);
+    if (pd.slice(0, 4) !== year) return;
+    const m = parseInt(pd.slice(5, 7), 10);
+    if (!m) return;
+    const sl = docSales(doc), co = docCostTotal(doc);
+    if (!months[m]) months[m] = { sales: 0, cost: 0 };
+    months[m].sales += sl; months[m].cost += co;
+    const client = doc.clientName && doc.clientName.trim() ? doc.clientName : "(未設定)";
+    const site = doc.siteName && doc.siteName.trim() ? doc.siteName : "(現場名なし)";
+    const key = client + "|" + site + "|" + m;
+    if (!sites[key]) sites[key] = { client, site, month: m, sales: 0, cost: 0, provisional: false };
+    sites[key].sales += sl; sites[key].cost += co;
+    if (!doc.workDate) sites[key].provisional = true;
+    sales += sl; cost += co;
+  });
+  const list = Object.values(sites).sort((a, b) => a.month - b.month || a.site.localeCompare(b.site));
+  return { months, sites: list, sales, cost };
+}
+
+// 施工日(完了日)が未入力の請求書(=未完成の現場の可能性)。yearEnd時点までの書類の原価合計も返す
+function buildUnfinished(year) {
+  const all = state.documents
+    .filter(isWorkDateMissing)
+    .sort((a, b) => (a.docDate || "").localeCompare(b.docDate || ""));
+  const carry = all.filter((d) => (d.docDate || "").slice(0, 4) <= year);
+  return { all, carry, carryCost: carry.reduce((sum, d) => sum + docCostTotal(d), 0) };
+}
+
 function getAvailableYears() {
   const years = new Set();
-  state.documents.forEach((d) => { if (d.docDate) years.add(d.docDate.slice(0, 4)); });
+  state.documents.forEach((d) => { const pd = periodDate(d); if (pd) years.add(pd.slice(0, 4)); });
   years.add(String(new Date().getFullYear()));
   return Array.from(years).sort().reverse();
 }
@@ -1053,7 +1145,7 @@ function renderDocRow(doc) {
     <div class="doc-row">
       <div class="doc-row-info">
         <div class="doc-row-title">${esc(doc.docType)}${doc.docNumber ? " No." + esc(doc.docNumber) : ""}</div>
-        <div class="doc-row-sub">📅 ${esc(doc.docDate || "")}${doc.workDate ? " ・ 🔧施工日 " + esc(doc.workDate) : ""}${doc.siteName ? " ・ 📍 " + esc(doc.siteName) : ""}</div>
+        <div class="doc-row-sub">📅 ${esc(doc.docDate || "")}${doc.workDate ? " ・ 🔧施工日 " + esc(doc.workDate) : (doc.docType === "請求書" ? ` ・ <span style="color:#dc2626;font-weight:700;">⚠施工日未入力</span>` : "")}${doc.siteName ? " ・ 📍 " + esc(doc.siteName) : ""}${docCostTotal(doc) > 0 ? " ・ 原価 " + esc(fmtYen(docCostTotal(doc))) : ""}</div>
       </div>
       <div class="doc-row-amount">${esc(fmtYen(doc.grandTotal))}</div>
       ${doc.docType === "請求書" ? `<button class="pay-badge no-print ${doc.paid ? "paid" : "unpaid"}" data-action="toggle-paid" data-id="${doc.id}">${doc.paid ? "入金済み" : "未入金"}</button>` : ""}
@@ -1085,7 +1177,7 @@ function exportDocExcel(id) {
 
   const rows = [];
   rows.push([doc.docType, doc.docNumber ? "No." + doc.docNumber : ""]);
-  rows.push(["日付", doc.docDate || "", "施工日", doc.workDate || ""]);
+  rows.push(["日付", doc.docDate || "", "着工日", doc.startDate || "", "施工日(完了日)", doc.workDate || ""]);
   rows.push(["発行者", doc.issuerName || ""]);
   rows.push(["宛先", (doc.clientName || "") + (doc.clientHonorific || "")]);
   rows.push(["現場名", doc.siteName || ""]);
@@ -1105,6 +1197,12 @@ function exportDocExcel(id) {
   rows.push([doc.docType === "請求書" ? "今回御請求額" : "合計金額", doc.grandTotal || 0]);
   if (doc.docType === "請求書") {
     rows.push(["入金状況", doc.paid ? "入金済み" : "未入金"]);
+    const c = normCosts(doc.costs);
+    rows.push([]);
+    rows.push(["現場原価(社内用)"]);
+    COST_FIELDS.forEach((f) => rows.push([f.label, toNum(c[f.key]) || 0]));
+    rows.push(["原価合計", docCostTotal(doc)]);
+    rows.push(["粗利(税抜売上-原価)", docSales(doc) - docCostTotal(doc)]);
   }
 
   const wb = XLSX.utils.book_new();
@@ -1165,8 +1263,8 @@ function renderClientMonthly(year, client, data) {
     </tr>`;
   }
   const docs = state.documents
-    .filter((d) => (d.clientName && d.clientName.trim() ? d.clientName : "(未設定)") === client && (d.docDate || "").slice(0, 4) === year)
-    .sort((a, b) => (b.docDate || "").localeCompare(a.docDate || ""));
+    .filter((d) => (d.clientName && d.clientName.trim() ? d.clientName : "(未設定)") === client && periodDate(d).slice(0, 4) === year)
+    .sort((a, b) => periodDate(b).localeCompare(periodDate(a)));
 
   return `
     <table class="sum-table" style="margin-bottom:14px;">
@@ -1280,7 +1378,7 @@ function exportSummaryExcel() {
   const wb = XLSX.utils.book_new();
 
   // 年間・会社別集計
-  const companyRows = [["会社名", "件数", "見積合計", "請求合計", "未入金", "締め日", "支払い日"]];
+  const companyRows = [["会社名", "件数", "見積合計(書類日基準)", "請求合計(施工日基準)", "未入金", "締め日", "支払い日"]];
   companies.forEach((c) => {
     const s = summary[c];
     const cs = getClientSetting(c);
@@ -1308,6 +1406,35 @@ function exportSummaryExcel() {
     });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(unpaidRows), sanitizeSheetName("未入金請求書", usedNames));
 
+  // 月別 売上・原価・粗利(施工日基準)
+  const pd = buildProfitData(year);
+  const plRows = [["月(施工日)", "売上(税抜)", "原価", "粗利", "粗利率"]];
+  for (let m = 1; m <= 12; m++) {
+    const md = pd.months[m];
+    if (!md) continue;
+    plRows.push([m + "月", md.sales, md.cost, md.sales - md.cost, md.sales > 0 ? (md.sales - md.cost) / md.sales : ""]);
+  }
+  plRows.push(["年間合計", pd.sales, pd.cost, pd.sales - pd.cost, pd.sales > 0 ? (pd.sales - pd.cost) / pd.sales : ""]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(plRows), sanitizeSheetName("月別損益(施工日基準)", usedNames));
+
+  // 現場別 売上・原価・粗利
+  const siteRows = [["現場名", "会社名", "月(施工日)", "売上(税抜)", "原価", "粗利", "粗利率", "備考"]];
+  pd.sites.forEach((x) => {
+    siteRows.push([x.site, x.client, x.month + "月", x.sales, x.cost, x.sales - x.cost, x.sales > 0 ? (x.sales - x.cost) / x.sales : "", x.provisional ? "施工日未入力(書類の日付で暫定)" : ""]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(siteRows), sanitizeSheetName("現場別損益", usedNames));
+
+  // 施工日(完了日)未入力の請求書(未完成の現場)
+  const un = buildUnfinished(year);
+  const unRows = [["No.", "日付", "現場名", "会社名", "売上(税抜)", "材料費", "外注費", "交通費", "その他経費", "原価合計"]];
+  un.all.forEach((d) => {
+    const c = normCosts(d.costs);
+    unRows.push([d.docNumber || "", d.docDate || "", d.siteName || "", d.clientName || "", docSales(d), toNum(c.material) || 0, toNum(c.outsource) || 0, toNum(c.travel) || 0, toNum(c.other) || 0, docCostTotal(d)]);
+  });
+  unRows.push([]);
+  unRows.push([year + "年末時点の未完成原価合計(未成工事支出金の候補)", "", "", "", "", "", "", "", "", un.carryCost]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(unRows), sanitizeSheetName("施工日未入力(未完成)", usedNames));
+
   // 会社ごとの月別明細・書類一覧
   companies.forEach((c) => {
     const data = summary[c];
@@ -1320,12 +1447,13 @@ function exportSummaryExcel() {
     rows.push(["年間合計", data.estimateTotal, data.invoiceTotal, data.unpaidInvoiceTotal]);
     rows.push([]);
     rows.push(["書類一覧"]);
-    rows.push(["種別", "No.", "日付", "施工日", "現場名", "金額", "入金状況"]);
+    rows.push(["種別", "No.", "日付", "着工日", "施工日(完了日)", "現場名", "金額", "入金状況", "売上(税抜)", "原価", "粗利"]);
     state.documents
-      .filter((d) => (d.clientName && d.clientName.trim() ? d.clientName : "(未設定)") === c && (d.docDate || "").slice(0, 4) === year)
-      .sort((a, b) => (b.docDate || "").localeCompare(a.docDate || ""))
+      .filter((d) => (d.clientName && d.clientName.trim() ? d.clientName : "(未設定)") === c && periodDate(d).slice(0, 4) === year)
+      .sort((a, b) => periodDate(b).localeCompare(periodDate(a)))
       .forEach((d) => {
-        rows.push([d.docType, d.docNumber || "", d.docDate || "", d.workDate || "", d.siteName || "", d.grandTotal || 0, d.docType === "請求書" ? (d.paid ? "入金済み" : "未入金") : ""]);
+        const inv = d.docType === "請求書";
+        rows.push([d.docType, d.docNumber || "", d.docDate || "", d.startDate || "", d.workDate || (inv ? "未入力" : ""), d.siteName || "", d.grandTotal || 0, inv ? (d.paid ? "入金済み" : "未入金") : "", inv ? docSales(d) : "", inv ? docCostTotal(d) : "", inv ? docSales(d) - docCostTotal(d) : ""]);
       });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sanitizeSheetName(c, usedNames));
   });
@@ -1336,6 +1464,77 @@ function exportSummaryExcel() {
 function exportSummaryPDF() {
   preparePrint();
   window.print();
+}
+
+function plColor(v) { return v < 0 ? "color:#dc2626;font-weight:700;" : ""; }
+function rateText(profit, sales) { return sales > 0 ? (Math.round(profit / sales * 1000) / 10) + "%" : "-"; }
+
+function renderProfitMonthly(year) {
+  const d = buildProfitData(year);
+  let rows = "";
+  for (let m = 1; m <= 12; m++) {
+    const md = d.months[m];
+    if (!md) continue;
+    const pr = md.sales - md.cost;
+    rows += `<tr>
+      <td class="cname" data-label="月">${m}月</td>
+      <td class="num" data-label="売上(税抜)">${esc(fmtYen(md.sales))}</td>
+      <td class="num" data-label="原価">${esc(fmtYen(md.cost))}</td>
+      <td class="num" data-label="粗利" style="${plColor(pr)}">${esc(fmtYen(pr))}</td>
+      <td class="num" data-label="粗利率">${esc(rateText(pr, md.sales))}</td>
+    </tr>`;
+  }
+  const tp = d.sales - d.cost;
+  return `
+    <table class="sum-table resp-cards">
+      <thead><tr><th>月(施工日)</th><th class="num">売上(税抜)</th><th class="num">原価</th><th class="num">粗利</th><th class="num">粗利率</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" style="text-align:center;color:#a8a29e;">データなし</td></tr>`}</tbody>
+      <tfoot><tr>
+        <td class="cname">年間合計</td>
+        <td class="num" data-label="売上(税抜)">${esc(fmtYen(d.sales))}</td>
+        <td class="num" data-label="原価">${esc(fmtYen(d.cost))}</td>
+        <td class="num" data-label="粗利" style="${plColor(tp)}">${esc(fmtYen(tp))}</td>
+        <td class="num" data-label="粗利率">${esc(rateText(tp, d.sales))}</td>
+      </tr></tfoot>
+    </table>`;
+}
+
+function renderSiteProfit(year) {
+  const d = buildProfitData(year);
+  if (!d.sites.length) return `<p class="empty-note">対象のデータがありません</p>`;
+  return `
+    <table class="sum-table resp-cards">
+      <thead><tr><th>現場</th><th>月</th><th class="num">売上(税抜)</th><th class="num">原価</th><th class="num">粗利</th><th class="num">粗利率</th></tr></thead>
+      <tbody>
+        ${d.sites.map((x) => {
+          const pr = x.sales - x.cost;
+          return `<tr>
+            <td class="cname">${esc(x.site)}<span style="display:block;font-size:11px;color:#78716c;font-weight:400;">${esc(x.client)}${x.provisional ? ` <span style="color:#dc2626;">⚠施工日未入力(暫定)</span>` : ""}</span></td>
+            <td data-label="月">${x.month}月</td>
+            <td class="num" data-label="売上(税抜)">${esc(fmtYen(x.sales))}</td>
+            <td class="num" data-label="原価">${esc(fmtYen(x.cost))}</td>
+            <td class="num" data-label="粗利" style="${plColor(pr)}">${esc(fmtYen(pr))}</td>
+            <td class="num" data-label="粗利率">${esc(rateText(pr, x.sales))}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+}
+
+function renderUnfinishedCard(year) {
+  const u = buildUnfinished(year);
+  if (!u.all.length) return "";
+  return `
+    <div class="card section-card warn-card">
+      <p class="warn-title">⚠ 施工日(完了日)未入力の請求書が${u.all.length}件あります</p>
+      <p style="font-size:12px;color:#57534e;margin:0 0 8px;">工事完成基準では施工日(完了日)の月に売上を計上します。未入力のものは集計で書類の日付を使った暫定計上です。完成済みなら開いて施工日を入れてください。未完成の現場は、原価が未成工事支出金の候補になります。</p>
+      <div style="background:#fff;border:1px solid #fca5a5;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;">
+        ${esc(year)}年末時点の未完成原価合計(未成工事支出金の候補)
+        <b style="float:right;">${esc(fmtYen(u.carryCost))}</b>
+        <span style="font-size:11px;color:#78716c;display:block;">対象 ${u.carry.length}件(書類の日付が${esc(year)}年12月末までのもの)</span>
+      </div>
+      ${u.all.map((d) => renderDocRow(d)).join("")}
+    </div>`;
 }
 
 function renderSummaryTab() {
@@ -1357,6 +1556,8 @@ function renderSummaryTab() {
       </div>
     </div>
 
+    ${renderUnfinishedCard(year)}
+
     <div class="card section-card">
       <div class="section-head">
         <h2>年間・会社別集計</h2>
@@ -1364,6 +1565,7 @@ function renderSummaryTab() {
           ${years.map((y) => `<option value="${y}" ${y === year ? "selected" : ""}>${y}年</option>`).join("")}
         </select>
       </div>
+      <p style="font-size:11px;color:#78716c;margin:0 0 8px;">請求書は施工日(完了日)の年・月で集計(工事完成基準)。見積書は書類の日付で集計。</p>
       <div>
       <table class="sum-table resp-cards" style="min-width:640px;">
         <thead><tr><th>会社名</th><th class="num">件数</th><th class="num">見積合計</th><th class="num">請求合計</th><th class="num">未入金</th><th>締め日</th><th>支払い日</th><th class="no-print" style="width:60px;"></th></tr></thead>
@@ -1402,6 +1604,20 @@ function renderSummaryTab() {
         <h2>全社合計(月別)</h2>
       </div>
       ${renderOverallMonthly(year)}
+    </div>
+
+    <div class="card section-card">
+      <div class="section-head">
+        <h2>月別 売上・原価・粗利(施工日基準)</h2>
+      </div>
+      ${renderProfitMonthly(year)}
+    </div>
+
+    <div class="card section-card">
+      <div class="section-head">
+        <h2>現場別 売上・原価・粗利</h2>
+      </div>
+      ${renderSiteProfit(year)}
     </div>
 
     <div class="card section-card">
@@ -1464,7 +1680,7 @@ function renderHeader() {
         <div>
           <p class="company">株式会社ナカミネ</p>
           <h1>見積書・請求書作成</h1>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-14 e</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-20 a</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
@@ -1499,7 +1715,8 @@ function renderDoc() {
         <div class="doc-meta">
           <div class="row"><label>No.</label><input type="text" id="docnumber-input" placeholder="例: M00068" value="${esc(state.docNumber)}" /></div>
           <div class="row"><label>日付</label><input type="date" id="date-input" value="${esc(state.docDate)}" /></div>
-          <div class="row"><label>施工日</label><input type="date" id="workdate-input" value="${esc(state.workDate)}" /></div>
+          <div class="row no-print"><label>着工日</label><input type="date" id="startdate-input" value="${esc(state.startDate)}" /></div>
+          <div class="row"><label>施工日(完了日)</label><input type="date" id="workdate-input" value="${esc(state.workDate)}" /></div>
           <div class="row"><label>登録番号</label><input type="text" id="regno-input" placeholder="T0000000000000" value="${esc(state.issuerRegNo)}" /></div>
         </div>
       </div>
@@ -1628,12 +1845,27 @@ function renderDoc() {
         </div>
       </div>
 
+      ${state.docType === "請求書" ? `
+      <div class="cost-box no-print">
+        <p class="title">現場原価(社内用・印刷されません)</p>
+        <div class="cost-grid">
+          ${COST_FIELDS.map((f) => `<label>${f.label}<input type="text" inputmode="decimal" data-cost="${f.key}" placeholder="0" value="${esc(state.costs[f.key])}" /></label>`).join("")}
+        </div>
+        <div class="cost-sum">
+          <span>売上(税抜) <b id="cost-sales"></b></span>
+          <span>原価合計 <b id="cost-total"></b></span>
+          <span>粗利 <b id="cost-profit"></b> <span id="cost-rate" style="color:#78716c;"></span></span>
+        </div>
+        <p class="price-note" style="margin:6px 0 0;">施工日(完了日)が空の請求書は「未完成の現場」として、原価が未成工事支出金の候補に集計されます。</p>
+      </div>` : ""}
+
       ${state.editingDocId ? `<p class="price-note no-print" style="color:#2563eb;">✏️ 保存済みの書類を編集中です(保存すると上書きされます)</p>` : ""}
 
       <div class="btn-row no-print">
         <button class="btn-secondary" data-action="clear">${state.editingDocId ? "新規作成" : "クリア"}</button>
         <button class="btn-primary" data-action="save-doc">${state.editingDocId ? "更新保存する" : "保存する"}</button>
-        <button class="btn-primary" data-action="print">🖨 印刷 / PDF保存</button>
+        <button class="btn-primary" data-action="print">🖨 印刷</button>
+        <button class="btn-primary" data-action="save-pdf" style="background:#2563eb;">📄 PDF保存</button>
       </div>
     </div>
   `;
@@ -1694,6 +1926,20 @@ function renderLineRow(it) {
     </tr>`;
 }
 
+function updateCostDom() {
+  const sEl = document.getElementById("cost-sales");
+  if (!sEl) return;
+  const sales = taxBase();
+  const cost = costTotalOf(state.costs);
+  const profit = sales - cost;
+  sEl.textContent = fmtYen(sales);
+  document.getElementById("cost-total").textContent = fmtYen(cost);
+  const pEl = document.getElementById("cost-profit");
+  pEl.textContent = fmtYen(profit);
+  pEl.style.color = profit < 0 ? "#dc2626" : "";
+  document.getElementById("cost-rate").textContent = sales > 0 ? "(" + (Math.round(profit / sales * 1000) / 10) + "%)" : "";
+}
+
 function updateTotalsDom() {
   const subEl = document.getElementById("totals-subtotal");
   const legalEl = document.getElementById("totals-legal");
@@ -1707,6 +1953,7 @@ function updateTotalsDom() {
   if (taxEl) taxEl.textContent = fmtNum(tax());
   if (grandEl) grandEl.textContent = fmtYen(grandTotal());
   if (boxEl) boxEl.textContent = fmtYen(grandTotal());
+  updateCostDom();
 }
 
 function bindDocRowEvents(root) {
@@ -1853,7 +2100,7 @@ function bindEvents() {
   });
 
   const simpleFields = {
-    "docnumber-input": "docNumber", "date-input": "docDate", "workdate-input": "workDate",
+    "docnumber-input": "docNumber", "date-input": "docDate", "workdate-input": "workDate", "startdate-input": "startDate",
     "client-postal-input": "clientPostal",
     "client-address-input": "clientAddress", "client-tel-input": "clientTel", "client-fax-input": "clientFax",
     "issuer-name-input": "issuerName", "issuer-postal-input": "issuerPostal",
@@ -1864,6 +2111,15 @@ function bindEvents() {
     const el = document.getElementById(elId);
     if (el) el.addEventListener("input", (e) => { state[simpleFields[elId]] = e.target.value; saveDraft(); });
   });
+
+  document.querySelectorAll("[data-cost]").forEach((el) => {
+    el.addEventListener("input", (e) => {
+      state.costs[el.dataset.cost] = e.target.value;
+      saveDraft();
+      updateCostDom();
+    });
+  });
+  updateCostDom();
 
   const honorificEl = document.getElementById("client-honorific-input");
   if (honorificEl) honorificEl.addEventListener("change", (e) => { state.clientHonorific = e.target.value; saveDraft(); });
@@ -2052,7 +2308,7 @@ function bindEvents() {
     if (confirm("入力内容をすべてクリアして新規作成します(会社情報は残ります)。よろしいですか?")) {
       state = Object.assign({}, state, {
         editingDocId: null,
-        docNumber: getNextDocNumber(state.docType), docDate: todayStr(), workDate: "",
+        docNumber: getNextDocNumber(state.docType), docDate: todayStr(), workDate: "", startDate: "", costs: normCosts(null),
         clientName: "", clientHonorific: "様", clientPostal: "", clientAddress: "", clientTel: "", clientFax: "",
         siteName: "",
         miscExpense: "", miscNote: "", eightPercentAmount: "", items: [newLineItem()],
@@ -2064,6 +2320,32 @@ function bindEvents() {
 
   const printBtn = document.querySelector('[data-action="print"]');
   if (printBtn) printBtn.addEventListener("click", () => { preparePrint(); window.print(); });
+  const savePdfBtn = document.querySelector('[data-action="save-pdf"]');
+  if (savePdfBtn) savePdfBtn.addEventListener("click", savePdf);
+}
+
+// PDF保存: 印刷画面の保存先を「PDFに保存」にするだけで済むよう、ファイル名を「請求書_No1_会社名」にしてから開く
+function savePdf() {
+  const base = [state.docType, state.docNumber ? "No" + state.docNumber : "", state.clientName || ""].filter(Boolean).join("_");
+  const oldTitle = document.title;
+  document.title = (base || state.docType).replace(/[\\/:*?"<>|]/g, "_");
+  const restore = () => { document.title = oldTitle; window.removeEventListener("afterprint", restore); };
+  window.addEventListener("afterprint", restore);
+  showToast("印刷画面で、送信先(プリンター)を「PDFに保存」にして保存してください");
+  preparePrint();
+  setTimeout(() => window.print(), 50);
+}
+
+function showToast(msg) {
+  const old = document.getElementById("app-toast");
+  if (old) old.remove();
+  const t = document.createElement("div");
+  t.id = "app-toast";
+  t.className = "no-print";
+  t.textContent = msg;
+  t.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1c1917;color:#fff;font-size:13px;padding:10px 16px;border-radius:8px;z-index:9999;max-width:90%;text-align:center;";
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
 }
 
 function preparePrint() {
