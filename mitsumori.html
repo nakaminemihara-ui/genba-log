@@ -238,7 +238,7 @@
     .no-print { display: none !important; }
     .wrap { max-width: 100%; width: 100%; padding: 0; }
     .card { border: none; }
-    .doc-card { padding: 0; }
+    .doc-card { padding: 0 3mm 0 0; } /* 右端の文字が紙の端で欠けないよう少し余白 */
     input, select, textarea {
       border: none !important; box-shadow: none !important; background: transparent !important;
       color: #000; padding: 1px 0 !important;
@@ -1819,7 +1819,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 f</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 g</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
