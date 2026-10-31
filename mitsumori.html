@@ -234,7 +234,7 @@
     .print-bank-value { display: block !important; width: 100%; white-space: normal; word-break: break-all; font-size: 10px; line-height: 1.4; }
   }
   @media print {
-    html, body { background: #fff; width: 210mm; }
+    html, body { background: #fff; width: auto; }
     .no-print { display: none !important; }
     .wrap { max-width: 100%; width: 100%; padding: 0; }
     .card { border: none; }
@@ -1819,7 +1819,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 e</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 f</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
