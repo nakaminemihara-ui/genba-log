@@ -306,7 +306,8 @@
     .client-block .window-zone .sub-row { margin-bottom: 2px; }
     .client-block .window-zone .name-row { margin: 2px 0 0; }
     .client-block .window-zone .print-input-value { white-space: normal; line-height: 1.3; font-size: 13px; }
-    .client-block .sub-row2 { position: absolute; left: calc(var(--win-left) - var(--page-m) + 2mm); top: calc(var(--win-top) - var(--page-m) - var(--top-h) + var(--win-h) + 3mm); width: calc(var(--win-w) - 4mm); }
+    .client-block .window-zone .sub-row2 { margin-top: 1px; }
+    .client-block .window-zone .sub-row2 input { font-size: 10px; }
     .client-block .greeting { position: absolute; left: calc(var(--win-left) - var(--page-m) + 2mm); top: calc(var(--win-top) - var(--page-m) - var(--top-h) + var(--win-h) + 9mm); margin: 0; }
     }
 </style>
@@ -1818,7 +1819,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 d</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 e</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
@@ -1883,10 +1884,10 @@ function renderDoc() {
             <div class="prefix-field staff-field"><span class="prefix-label">現場担当</span><input type="text" id="client-staff-input" placeholder="担当者名" value="${esc(state.clientStaff || "")}" /></div>
           </div>
           <div class="sub-row"><input type="text" id="client-address-input" placeholder="住所" value="${esc(state.clientAddress)}" /></div>
-          </div>
           <div class="sub-row2">
             <div class="prefix-field tel-fax-field"><span class="prefix-label">TEL</span><input type="text" id="client-tel-input" value="${esc(state.clientTel)}" /></div>
             <div class="prefix-field tel-fax-field"><span class="prefix-label">FAX</span><input type="text" id="client-fax-input" value="${esc(state.clientFax)}" /></div>
+          </div>
           </div>
           <p class="greeting">下記の通り${state.docType === "見積書" ? "御見積り" : "御請求"}申し上げます。</p>
         </div>
