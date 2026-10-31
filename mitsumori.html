@@ -359,6 +359,8 @@ const CORE_PRICE_TABLE_DP = {
 
 // 作業内容ごとに、サイズ入力(Φ×厚)欄を出す対象かどうか
 const CORE_SIZE_WORKS = ["コア抜き", "DPコア抜き", "フェローデッキコア抜き", "DP＋RCコア抜き"];
+// 請求書では単価表からの自動入力をしない(見積書のみ)
+function autoPriceOn() { return state.docType !== "請求書"; }
 function hasCoreSize(work) {
   return CORE_SIZE_WORKS.indexOf(work) !== -1;
 }
@@ -463,8 +465,10 @@ function mapGenbaLineItem(it) {
   if (WORK_TYPES.indexOf(work) === -1) work = "自由入力";
   const workCustom = work === "自由入力" ? (it.work || "") : "";
   const noteParts = [];
-  if (it.haturiLength) noteParts.push("斫り長:" + it.haturiLength);
   if (it.note) noteParts.push(it.note);
+  const isCoreW = hasCoreSize(work), isHatsuriW = work === "斫り";
+  // 作業伝票のコア抜きは「Φ×長さ(=厚み)」で入力されているので、見積書側の「×厚」に入れる
+  // 作業伝票のはつりは「幅×長さ×深さ」(長さは haturiLength)なので、見積書側の「長×幅×深」に合わせる
   return {
     id: uid(),
     work,
@@ -472,9 +476,9 @@ function mapGenbaLineItem(it) {
     // 作業伝票の「作業場所」を見積書・請求書の「品名・補足」欄にそのまま反映する
     label: it.location || "",
     diameter: it.diameter || "",
-    depth: it.depth || "",
+    depth: isCoreW ? (it.depth || it.length || "") : (it.depth || ""),
     coreType: "通常",
-    length: it.length || "",
+    length: isHatsuriW ? (it.haturiLength || it.length || "") : (isCoreW ? "" : (it.length || "")),
     width: it.width || "",
     qty: it.qty || "1",
     unit: UNITS.indexOf(it.unit) !== -1 ? it.unit : UNITS[0],
@@ -1175,8 +1179,9 @@ function migrateFellowPrices() {
     });
     return n;
   };
-  changed += fixItems(state.items);
+  if (autoPriceOn()) changed += fixItems(state.items);
   (state.documents || []).forEach((doc) => {
+    if (doc.docType === "請求書") return;
     if (!fixItems(doc.items)) return;
     changed++;
     // 合計の計算は現在の入力内容を使う関数なので、一時的に書類の内容に差し替えて計算する
@@ -1821,7 +1826,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 h</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 i</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
@@ -2042,7 +2047,7 @@ function renderLineRow(it) {
          <span>×厚</span><input type="text" inputmode="decimal" data-li="${it.id}" data-field="depth" value="${esc(it.depth)}" />
          <span>mm</span>
        </div>
-       <p class="price-note" id="price-note-${it.id}">${coreTableForWork(it.work) && it.diameter && it.depth && !lookupCorePrice(it.diameter, it.depth, it.work) ? "表の範囲外(手入力)" : ""}</p>`
+       <p class="price-note" id="price-note-${it.id}">${autoPriceOn() && coreTableForWork(it.work) && it.diameter && it.depth && !lookupCorePrice(it.diameter, it.depth, it.work) ? "表の範囲外(手入力)" : ""}</p>`
     : isHatsuri
     ? `<input type="text" data-li="${it.id}" list="label-suggest-list" autocomplete="off" data-field="label" placeholder="品名・階数など(任意)" value="${esc(it.label)}" />
        <div class="core-size-inline">
@@ -2388,7 +2393,7 @@ function bindEvents() {
       if (!item) return;
       item[field] = val;
 
-      if (field === "diameter" || field === "depth") {
+      if ((field === "diameter" || field === "depth") && autoPriceOn()) {
         const auto = lookupCorePrice(item.diameter, item.depth, item.work);
         if (auto != null) { item.price = String(auto); item.autoPriced = true; }
         else { item.autoPriced = false; }
@@ -2399,7 +2404,7 @@ function bindEvents() {
 
       if (field === "work") {
         // 作業内容を切り替えたとき、サイズ入力済みなら単価表に合わせて再計算する
-        if (hasCoreSize(item.work) && item.diameter && (item.depth || item.work === "フェローデッキコア抜き")) {
+        if (autoPriceOn() && hasCoreSize(item.work) && item.diameter && (item.depth || item.work === "フェローデッキコア抜き")) {
           const auto = lookupCorePrice(item.diameter, item.depth, item.work);
           if (auto != null) { item.price = String(auto); item.autoPriced = true; }
         }
@@ -2413,7 +2418,7 @@ function bindEvents() {
         if (priceInput) priceInput.value = item.price;
         const noteEl = document.getElementById(`price-note-${id}`);
         if (noteEl) {
-          noteEl.textContent = (coreTableForWork(item.work) && item.diameter && item.depth && !lookupCorePrice(item.diameter, item.depth, item.work))
+          noteEl.textContent = (autoPriceOn() && coreTableForWork(item.work) && item.diameter && item.depth && !lookupCorePrice(item.diameter, item.depth, item.work))
             ? "表の範囲外(手入力)" : "";
         }
         const amountEl = document.getElementById(`amount-${id}`);
