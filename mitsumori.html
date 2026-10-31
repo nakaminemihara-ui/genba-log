@@ -284,11 +284,15 @@
   :root { --win-left: 20mm; --win-top: 24mm; --win-w: 84mm; --win-h: 34mm; --page-m: 10mm; --top-h: 12mm; }
   .prefix-field.staff-field { flex: 1; }
   .prefix-field.staff-field input { font-size: 10px; color: #57534e; }
+  .line-date { display: block; margin-top: 3px; font-size: 11px; width: 100%; box-sizing: border-box; }
+  .print-line-date { display: none; }
   .print-date-value, .print-addr-value { display: none; }
   @media print {
     @page { size: A4 portrait; margin: var(--page-m); }
     input[type="date"] { display: none !important; }
     .print-date-value { display: inline !important; font-size: 12px; color: #000; }
+    .print-line-date { display: block !important; font-size: 10px; color: #292524; }
+    .print-line-date:empty { display: none !important; }
     .doc-meta .row.print-empty { display: none !important; }
     .doc-card { position: relative; }
     .doc-top { height: var(--top-h); margin: 0; overflow: visible; }
@@ -460,7 +464,7 @@ const GENBA_LOG_API_URLS = {
 const GENBA_WORK_TYPE_MAP = { "はつり": "斫り", "雑工": "自由入力" };
 
 // 作業伝票から読み込んだ明細行を、見積書・請求書の明細行の形式に変換する
-function mapGenbaLineItem(it) {
+function mapGenbaLineItem(it, entryDate) {
   let work = GENBA_WORK_TYPE_MAP[it.work] || it.work;
   if (WORK_TYPES.indexOf(work) === -1) work = "自由入力";
   const workCustom = work === "自由入力" ? (it.work || "") : "";
@@ -471,6 +475,7 @@ function mapGenbaLineItem(it) {
   // 作業伝票のはつりは「幅×長さ×深さ」(長さは haturiLength)なので、見積書側の「長×幅×深」に合わせる
   return {
     id: uid(),
+    date: normDate(entryDate),
     work,
     workCustom,
     // 作業伝票の「作業場所」を見積書・請求書の「品名・補足」欄にそのまま反映する
@@ -535,6 +540,7 @@ function bindImportEntryButtons() {
   });
 }
 
+function shortDate(v) { const m = String(v || "").match(/(\d{4})-(\d{2})-(\d{2})/); return m ? parseInt(m[2], 10) + "/" + parseInt(m[3], 10) : ""; }
 function normDate(v) {
   const m = String(v || "").match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
   return m ? m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0") : "";
@@ -550,7 +556,7 @@ function importGenbaEntries(ids) {
   if (!entries.length) return;
   let mapped = [];
   entries.forEach((entry) => {
-    mapped = mapped.concat((entry.lineItems || []).map(mapGenbaLineItem).filter((it) => it.qty !== "" || it.price !== "" || it.label || it.workCustom));
+    mapped = mapped.concat((entry.lineItems || []).map((li) => mapGenbaLineItem(li, entry.date)).filter((it) => it.qty !== "" || it.price !== "" || it.label || it.workCustom));
   });
   if (mapped.length === 0) mapped.push(newLineItem());
 
@@ -647,7 +653,7 @@ function uid() {
 
 function newLineItem() {
   return {
-    id: uid(), work: WORK_TYPES[0], workCustom: "", label: "", diameter: "", depth: "", coreType: "通常",
+    id: uid(), date: "", work: WORK_TYPES[0], workCustom: "", label: "", diameter: "", depth: "", coreType: "通常",
     length: "", width: "",
     qty: "1", unit: UNITS[0], price: "", note: "", autoPriced: false,
   };
@@ -1420,7 +1426,7 @@ function exportDocExcel(id) {
       rows.push([it.label || "見出し"]);
       return;
     }
-    const work = it.work === "自由入力" ? (it.workCustom || "自由入力") : it.work;
+    const work = (it.work === "自由入力" ? (it.workCustom || "自由入力") : it.work) + (it.date ? "(" + shortDate(it.date) + ")" : "");
     rows.push([work, it.label || "", it.qty || "", it.unit || "", toNum(it.price) || 0, lineTotal(it), it.note || ""]);
   });
   rows.push([]);
@@ -1925,7 +1931,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 j</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 k</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
@@ -2124,7 +2130,8 @@ function renderLineRow(it) {
   const workSelect = `<select data-li="${it.id}" data-field="work">
     ${WORK_TYPES.map((w) => `<option value="${w}" ${it.work === w ? "selected" : ""}>${w === "見出し行" ? "見出し" : w}</option>`).join("")}
   </select>
-  ${it.work === "自由入力" ? `<input type="text" class="work-custom-input" data-li="${it.id}" data-field="workCustom" placeholder="作業内容を入力" value="${esc(it.workCustom)}" style="margin-top:3px;font-size:11px;" />` : ""}`;
+  ${it.work === "自由入力" ? `<input type="text" class="work-custom-input" data-li="${it.id}" data-field="workCustom" placeholder="作業内容を入力" value="${esc(it.workCustom)}" style="margin-top:3px;font-size:11px;" />` : ""}
+  ${it.work === "見出し行" ? "" : `<input type="date" class="line-date" data-li="${it.id}" data-field="date" title="作業日" value="${esc(it.date || "")}" /><span class="print-line-date"></span>`}`;
   if (isHeading(it)) {
     return `
       <tr class="heading-row" data-row="${it.id}">
@@ -2657,6 +2664,11 @@ function preparePrint() {
     const v = staffInp.value.trim();
     if (v && !/(様|殿|さん)$/.test(v)) { staffInp.value = v + "様"; state.clientStaff = staffInp.value; saveDraft(); }
   }
+  // 明細の作業日(印刷では「10/5」のような文字にする)
+  document.querySelectorAll("input.line-date").forEach((inp) => {
+    const sp = inp.nextElementSibling;
+    if (sp && sp.classList.contains("print-line-date")) sp.textContent = shortDate(inp.value);
+  });
   // 請求先住所(入力欄だと長いと切れるので、折り返せる文字にして印刷)
   const addrInp = document.getElementById("client-address-input");
   if (addrInp) {
