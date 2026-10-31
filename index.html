@@ -338,7 +338,7 @@ function renderListTab() {
       <button class="btn-primary" data-action="open-form">+ 新規記録</button>
       <div class="search-wrap">
         <span class="icon">🔍</span>
-        <input type="text" id="search-input" placeholder="現場名・作業内容で検索" value="${esc(state.query)}" />
+        <input type="text" id="search-input" placeholder="現場名・発注会社名で検索" value="${esc(state.query)}" />
       </div>
       <p class="hint">ゴミ箱アイコンを長押しすると削除できます</p>
       ${renderEntryList()}
@@ -353,9 +353,9 @@ function renderEntryList() {
   const q = state.query.trim().toLowerCase();
   const filtered = state.entries.filter((e) => {
     if (!q) return true;
-    const inSite = e.siteName.toLowerCase().includes(q);
-    const inWork = (e.lineItems || []).some((it) => it.work.toLowerCase().includes(q));
-    return inSite || inWork;
+    const inSite = (e.siteName || "").toLowerCase().includes(q);
+    const inClient = (e.clientCompany || "").toLowerCase().includes(q);
+    return inSite || inClient;
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
 
   if (filtered.length === 0) {
@@ -782,7 +782,18 @@ function bindEvents() {
 
   const searchInput = document.getElementById("search-input");
   if (searchInput) {
-    searchInput.addEventListener("input", (e) => { state.query = e.target.value; render(); searchInput.focus(); searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length); });
+    // 再描画で入力欄が作り直されるので、描画後に新しい入力欄へフォーカスを戻す。
+    // 日本語入力の変換中は再描画しない(変換が途切れて1文字しか入力できなくなるため)。
+    let composing = false;
+    const applyQuery = (v) => {
+      state.query = v;
+      render();
+      const n = document.getElementById("search-input");
+      if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+    };
+    searchInput.addEventListener("compositionstart", () => { composing = true; });
+    searchInput.addEventListener("compositionend", (e) => { composing = false; applyQuery(e.target.value); });
+    searchInput.addEventListener("input", (e) => { if (composing || e.isComposing) return; applyQuery(e.target.value); });
   }
 
   // entry delete (long press)
