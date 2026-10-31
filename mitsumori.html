@@ -522,15 +522,36 @@ function closeImportModal() {
 }
 
 function bindImportEntryButtons() {
+  document.querySelectorAll('[data-action="import-genba-site"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const site = btn.dataset.site;
+      const ids = importModal.entries.filter((e) => (e.siteName || "") === site).map((e) => e.id);
+      if (ids.length > 1 && !confirm("「" + (site || "現場名なし") + "」の作業伝票 " + ids.length + "件を、まとめて取り込みます。よろしいですか?")) return;
+      importGenbaEntries(ids);
+    });
+  });
   document.querySelectorAll('[data-action="import-genba-entry"]').forEach((btn) => {
     btn.addEventListener("click", () => { importGenbaEntry(btn.dataset.id); });
   });
 }
 
-function importGenbaEntry(entryId) {
-  const entry = importModal.entries.find((e) => e.id === entryId);
-  if (!entry) return;
-  const mapped = (entry.lineItems || []).map(mapGenbaLineItem).filter((it) => it.qty !== "" || it.price !== "" || it.label || it.workCustom);
+function normDate(v) {
+  const m = String(v || "").match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  return m ? m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0") : "";
+}
+
+function importGenbaEntry(entryId) { importGenbaEntries([entryId]); }
+
+// 作業伝票を1件以上まとめて、いま開いている書類に取り込む(現場ごとの一括取り込みにも使う)
+function importGenbaEntries(ids) {
+  undoFlush();
+  const entries = ids.map((id) => importModal.entries.find((e) => e.id === id)).filter(Boolean)
+    .sort((a, b) => normDate(a.date).localeCompare(normDate(b.date)));
+  if (!entries.length) return;
+  let mapped = [];
+  entries.forEach((entry) => {
+    mapped = mapped.concat((entry.lineItems || []).map(mapGenbaLineItem).filter((it) => it.qty !== "" || it.price !== "" || it.label || it.workCustom));
+  });
   if (mapped.length === 0) mapped.push(newLineItem());
 
   // 現在の明細が未入力の初期状態(1行だけ・空)なら読み込んだ内容で置き換え、
@@ -545,13 +566,24 @@ function importGenbaEntry(entryId) {
     state.items = state.items.concat(mapped);
   }
 
-  if (!state.siteName.trim()) state.siteName = entry.siteName || "";
-  if (!state.workDate) state.workDate = entry.date || "";
-  if (!state.clientName.trim() && entry.clientCompany) state.clientName = entry.clientCompany;
+  const dates = entries.map((e) => normDate(e.date)).filter(Boolean).sort();
+  if (dates.length) {
+    const last = dates[dates.length - 1], firstD = dates[0];
+    // 施工日(完了日)=いちばん新しい作業日、着工日=いちばん古い作業日
+    if (!state.workDate || last > state.workDate) state.workDate = last;
+    if (!state.startDate || firstD < state.startDate) state.startDate = firstD;
+  }
+  const e0 = entries[0];
+  if (!state.siteName.trim()) state.siteName = e0.siteName || "";
+  if (!state.clientName.trim()) {
+    const ec = entries.map((e) => e.clientCompany).find(Boolean);
+    if (ec) state.clientName = ec;
+  }
 
   closeImportModal();
   saveDraft();
   render();
+  showToast(entries.length > 1 ? entries.length + "件の作業伝票を取り込みました" : "作業伝票を取り込みました");
 }
 
 function renderImportModal() {
@@ -582,16 +614,30 @@ function renderImportModalListOnly() {
   if (importModal.loading) return `<p style="padding:20px;text-align:center;color:#78716c;">読み込み中…</p>`;
   if (importModal.error) return `<p style="padding:20px;text-align:center;color:#dc2626;">${esc(importModal.error)}</p>`;
   if (filtered.length === 0) return `<p style="padding:20px;text-align:center;color:#78716c;">該当する作業伝票の記録がありません。</p>`;
-  return filtered.map((e) => {
-    const workSummary = (e.lineItems || []).map((it) => it.work).filter(Boolean).slice(0, 3).join("・");
-    return `
-      <div style="border:1px solid #e7e5e4;border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+  // 現場ごとにまとめて表示(一括取り込みボタン付き)
+  const groups = {};
+  filtered.forEach((e) => { const k = e.siteName || ""; (groups[k] = groups[k] || []).push(e); });
+  const keys = Object.keys(groups).sort((x, y) => (groups[y][0].date || "").localeCompare(groups[x][0].date || ""));
+  return keys.map((k) => {
+    const list = groups[k];
+    const total = importModal.entries.filter((e) => (e.siteName || "") === k).length;
+    const head = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0 6px;">
+        <div style="font-size:13px;font-weight:700;min-width:0;">📍 ${esc(k || "(現場名なし)")} <span style="font-size:11px;color:#78716c;font-weight:400;">${total}件</span></div>
+        <button type="button" data-action="import-genba-site" data-site="${esc(k)}" style="flex-shrink:0;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;">この現場を一括取り込み</button>
+      </div>`;
+    const rows = list.map((e) => {
+      const workSummary = (e.lineItems || []).map((it) => it.work).filter(Boolean).slice(0, 3).join("・");
+      return `
+      <div style="border:1px solid #e7e5e4;border-radius:8px;padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <div style="min-width:0;">
-          <div style="font-size:13px;font-weight:600;">${esc(e.siteName || "(現場名なし)")}</div>
-          <div style="font-size:11.5px;color:#78716c;margin-top:2px;">📅 ${esc(e.date || "")}${e.clientCompany ? " ・ " + esc(e.clientCompany) : ""}${workSummary ? " ・ " + esc(workSummary) : ""}</div>
+          <div style="font-size:12.5px;font-weight:600;">📅 ${esc(e.date || "")}${e.clientCompany ? " ・ " + esc(e.clientCompany) : ""}</div>
+          <div style="font-size:11.5px;color:#78716c;margin-top:2px;">${esc(workSummary)}</div>
         </div>
         <button type="button" data-action="import-genba-entry" data-id="${esc(e.id)}" style="flex-shrink:0;font-size:12.5px;background:#1c1917;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">取り込む</button>
       </div>`;
+    }).join("");
+    return head + rows;
   }).join("");
 }
 
@@ -687,7 +733,58 @@ function loadDraft() {
   } catch (e) {}
 }
 
+// ===== ひとつ前に戻る(全ページ共通) =====
+let undoStack = [];
+let undoBase = null;
+let undoTimer = null;
+function undoSnap() {
+  const o = JSON.parse(JSON.stringify(state));
+  delete o.tab; delete o.docQuery;
+  return JSON.stringify(o);
+}
+function undoUpdateBtn() {
+  const b = document.getElementById("undo-btn");
+  if (b) b.disabled = !undoStack.length;
+}
+function undoCommit() {
+  const cur = undoSnap();
+  if (undoBase === null) { undoBase = cur; return; }
+  if (cur !== undoBase) {
+    undoStack.push(undoBase);
+    if (undoStack.length > 40) undoStack.shift();
+    undoBase = cur;
+    undoUpdateBtn();
+  }
+}
+function undoFlush() { clearTimeout(undoTimer); undoCommit(); }
+function undoRebase() { undoBase = undoSnap(); }
+function undoSchedule() { clearTimeout(undoTimer); undoTimer = setTimeout(undoCommit, 700); }
+function doUndo() {
+  undoFlush();
+  const prev = undoStack.pop();
+  if (!prev) { undoUpdateBtn(); return; }
+  const restored = JSON.parse(prev);
+  restored.tab = state.tab; restored.docQuery = state.docQuery;
+  // 月締め・パスワードは「戻す」で外せないよう、現在の状態を保つ
+  if (state.closedMonths !== undefined) restored.closedMonths = state.closedMonths;
+  if (state.unlockHash !== undefined) restored.unlockHash = state.unlockHash;
+  const curMap = {}; (state.documents || []).forEach((d) => { curMap[d.id] = JSON.stringify(d); });
+  const resMap = {}; (restored.documents || []).forEach((d) => { resMap[d.id] = JSON.stringify(d); });
+  const upsert = Object.keys(resMap).filter((id) => curMap[id] !== resMap[id]);
+  const remove = Object.keys(curMap).filter((id) => !(id in resMap));
+  const settingsChanged = JSON.stringify(state.clientSettings) !== JSON.stringify(restored.clientSettings);
+  state = restored;
+  undoRebase();
+  saveDraft();
+  render();
+  showToast("ひとつ前に戻しました");
+  if (API_URL && (upsert.length || remove.length || settingsChanged)) {
+    saveDocumentsToCloud({ upsert, remove, settings: true });
+  }
+}
+
 function saveDraft() {
+  undoSchedule();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {}
@@ -909,6 +1006,7 @@ async function deleteDocument(id) {
     (doc.clientName || "") + " / " + fmtYen(doc.grandTotal)
   );
   if (!ok) return;
+  undoFlush();
   state.documents = state.documents.filter((d) => d.id !== id);
   if (state.editingDocId === id) state.editingDocId = null;
   saveDraft();
@@ -1214,6 +1312,7 @@ async function loadDocumentsFromCloud(silent) {
       state.fiscalEndMonth = parseInt(data.settings.fiscalEndMonth, 10);
     }
     syncStatus.error = false;
+    undoRebase(); clearTimeout(undoTimer);
     saveDraft();
     if (migrateFellowPrices()) { syncStatus.syncing = false; render(); await saveDocumentsToCloud(); return; }
   } catch (e) {
@@ -1826,10 +1925,11 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 i</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 j</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
+          <button id="undo-btn" data-action="undo" ${undoStack.length ? "" : "disabled"} style="font-size:11px;background:#fff;border:1px solid #e7e5e4;border-radius:6px;padding:3px 8px;cursor:pointer;margin-right:4px;">↩ ひとつ前に戻る</button>
           ${API_URL ? `<button data-action="refresh" style="font-size:11px;background:#fff;border:1px solid #e7e5e4;border-radius:6px;padding:3px 8px;cursor:pointer;">🔄 更新</button>` : ""}
         </div>
       </div>
@@ -2139,6 +2239,8 @@ function bindEvents() {
     });
   });
 
+  const undoBtn = document.getElementById("undo-btn");
+  if (undoBtn) undoBtn.addEventListener("click", doUndo);
   const refreshBtn = document.querySelector('[data-action="refresh"]');
   if (refreshBtn) refreshBtn.addEventListener("click", async () => { await loadDocumentsFromCloud(); });
 
@@ -2472,6 +2574,7 @@ function bindEvents() {
   const clearBtn = document.querySelector('[data-action="clear"]');
   if (clearBtn) clearBtn.addEventListener("click", () => {
     if (confirm("入力内容をすべてクリアして新規作成します(会社情報は残ります)。よろしいですか?")) {
+      undoFlush();
       state = Object.assign({}, state, {
         editingDocId: null,
         docNumber: getNextDocNumber(state.docType), docDate: todayStr(), workDate: "", startDate: "", costs: normCosts(null),
@@ -2590,6 +2693,7 @@ function preparePrint() {
 
 (async () => {
   loadDraft();
+  undoRebase();
   migrateFellowPrices();
   if (API_URL) {
     await loadDocumentsFromCloud(true);
@@ -2598,6 +2702,7 @@ function preparePrint() {
   if (!state.editingDocId && !state.docNumber.trim()) {
     state.docNumber = getNextDocNumber(state.docType);
   }
+  undoStack = []; undoRebase(); clearTimeout(undoTimer);
   render();
 })();
 </script>
