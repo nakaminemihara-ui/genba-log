@@ -296,6 +296,8 @@
     .doc-meta .row { margin-bottom: 2px; }
     .parties { display: grid; grid-template-columns: 1fr 1fr; position: relative; min-height: 64mm; }
     .issuer-block { margin-top: 26mm; grid-column: 2; }
+    .issuer-stamp { top: -32px; right: 4px; }
+    #issuer-address-input { font-size: 11px; }
     .client-block { position: static; border-bottom: none; }
     .client-block .window-zone {
       position: absolute; left: calc(var(--win-left) - var(--page-m) + 2mm); top: calc(var(--win-top) - var(--page-m) - var(--top-h) + 2mm);
@@ -1819,7 +1821,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 g</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 h</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
