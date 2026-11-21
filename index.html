@@ -36,6 +36,14 @@
     padding: 9px 10px; background: #fafaf9; outline: none; width: 100%;
   }
   input:focus, select:focus, textarea:focus { border-color: #fb923c; box-shadow: 0 0 0 1px #fb923c; }
+  .range-box { background: #fff; border: 1px solid #e7e5e4; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; color: #57534e; }
+  .range-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+  .range-row:last-child { margin-bottom: 0; }
+  .range-row input[type="date"] { width: auto; flex: 1; min-width: 120px; font-size: 13px; }
+  .range-row select { width: auto; flex: 1; min-width: 120px; font-size: 13px; }
+  .range-row input.close-day { width: 90px; flex: none; font-size: 13px; }
+  .range-row button { font-size: 12px; background: #fff; border: 1px solid #d6d3d1; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+  .range-sum { font-size: 12px; color: #57534e; margin: 0 0 8px; font-weight: 600; }
   .search-wrap { position: relative; margin-bottom: 6px; }
   .search-wrap input { padding-left: 32px; background: #fff; }
   .search-wrap .icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #a8a29e; font-size: 14px; }
@@ -136,7 +144,7 @@
 <div class="wrap" id="app"></div>
 
 <script>
-const WORK_TYPES = ["はつり", "コア抜き", "雑工"];
+const WORK_TYPES = ["はつり", "コア抜き", "現場調査費", "レントゲン", "鉄筋探査", "雑工", "相番"];
 const UNITS = ["本", "式", "人"];
 const STORAGE_KEY = "genba-entries-standalone";
 
@@ -161,6 +169,9 @@ let state = {
   tab: "list",
   showForm: false,
   query: "",
+  rangeFrom: "",
+  rangeTo: "",
+  closeCompany: "",
   summaryYear: new Date().getFullYear(),
   summarySite: "",
   summaryClient: "",
@@ -331,11 +342,95 @@ function renderTabs() {
     </div>`;
 }
 
+// ===== 期間で絞り込み・会社ごとの締め日 =====
+function pad2(n) { return String(n).padStart(2, "0"); }
+function ymd(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+function monthRangeOf(offset) {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + offset);
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return { from: d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-01", to: ymd(last) };
+}
+const CLOSING_KEY = STORAGE_KEY + "-closing";
+function loadClosing() { try { return JSON.parse(localStorage.getItem(CLOSING_KEY) || "{}") || {}; } catch (e) { return {}; } }
+function getClosingDay(company) { const m = loadClosing(); return m[company || "__all__"] || ""; }
+function setClosingDay(company, v) { try { const m = loadClosing(); m[company || "__all__"] = v; localStorage.setItem(CLOSING_KEY, JSON.stringify(m)); } catch (e) {} }
+function closingDayOf(str, y, m) { // m: 0始まり
+  const t = String(str || "").trim();
+  if (!t) return 0;
+  const last = new Date(y, m + 1, 0).getDate();
+  if (/末/.test(t)) return last;
+  const n = parseInt(t.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 65248)), 10);
+  return n >= 1 ? Math.min(n, last) : 0;
+}
+// 締め日の期間一覧(新しい順): 例 締め日20 → 10/21〜11/20(11月締め)
+function closingPeriods(str) {
+  const out = [];
+  if (!closingDayOf(str, 2026, 0)) return out;
+  const now = new Date();
+  for (let k = 1; k >= -12; k--) {
+    const endM = new Date(now.getFullYear(), now.getMonth() + k, 1);
+    const endD = new Date(endM.getFullYear(), endM.getMonth(), closingDayOf(str, endM.getFullYear(), endM.getMonth()));
+    const pm = new Date(endM.getFullYear(), endM.getMonth() - 1, 1);
+    const prevEnd = new Date(pm.getFullYear(), pm.getMonth(), closingDayOf(str, pm.getFullYear(), pm.getMonth()));
+    const start = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), prevEnd.getDate() + 1);
+    out.push({ from: ymd(start), to: ymd(endD), label: (start.getMonth() + 1) + "/" + start.getDate() + "〜" + (endD.getMonth() + 1) + "/" + endD.getDate() + "(" + (endD.getMonth() + 1) + "月締め)" });
+  }
+  return out;
+}
+function mdLabel(d) { const m = String(d || "").match(/(\d{4})-(\d{2})-(\d{2})/); return m ? parseInt(m[2], 10) + "/" + parseInt(m[3], 10) : ""; }
+
+function renderRangeBox() {
+  const companies = Array.from(new Set(state.entries.map((e) => e.clientCompany).filter(Boolean))).sort();
+  const cd = getClosingDay(state.closeCompany);
+  const periods = closingPeriods(cd);
+  const curPeriod = periods.find((x) => x.from === state.rangeFrom && x.to === state.rangeTo);
+  return `
+    <div class="range-box">
+      <div class="range-row"><span>期間</span>
+        <input type="date" id="range-from" value="${esc(state.rangeFrom)}" /><span>〜</span><input type="date" id="range-to" value="${esc(state.rangeTo)}" />
+      </div>
+      <div class="range-row">
+        <button type="button" data-range="this">今月</button><button type="button" data-range="prev">先月</button><button type="button" data-range="clear">期間・会社をクリア</button>
+      </div>
+      <div class="range-row"><span>会社</span>
+        <select id="close-company"><option value="">すべて</option>${companies.map((c) => `<option value="${esc(c)}" ${state.closeCompany === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+        <span>締め日</span><input type="text" class="close-day" id="close-day" placeholder="例 20・末" value="${esc(cd)}" />
+      </div>
+      <div class="range-row">
+        <select id="close-period"><option value="">${periods.length ? "締め日の期間を選ぶ" : "締め日を入れると期間が選べます"}</option>${periods.map((x) => `<option value="${x.from}|${x.to}" ${curPeriod === x ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
+      </div>
+    </div>`;
+}
+function bindRangeBox() {
+  const f = document.getElementById("range-from"), t = document.getElementById("range-to");
+  if (f) f.addEventListener("change", (e) => { state.rangeFrom = e.target.value; render(); });
+  if (t) t.addEventListener("change", (e) => { state.rangeTo = e.target.value; render(); });
+  document.querySelectorAll("[data-range]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const k = b.dataset.range;
+      if (k === "clear") { state.rangeFrom = ""; state.rangeTo = ""; state.closeCompany = ""; }
+      else { const r = monthRangeOf(k === "prev" ? -1 : 0); state.rangeFrom = r.from; state.rangeTo = r.to; }
+      render();
+    });
+  });
+  const c = document.getElementById("close-company");
+  if (c) c.addEventListener("change", (e) => { state.closeCompany = e.target.value; render(); });
+  const d = document.getElementById("close-day");
+  if (d) d.addEventListener("change", (e) => { setClosingDay(state.closeCompany, e.target.value.trim()); render(); });
+  const p = document.getElementById("close-period");
+  if (p) p.addEventListener("change", (e) => {
+    if (!e.target.value) return;
+    const [a, b2] = e.target.value.split("|");
+    state.rangeFrom = a; state.rangeTo = b2; render();
+  });
+}
+
 function renderListTab() {
   let html = "";
   if (!state.showForm) {
     html += `
       <button class="btn-primary" data-action="open-form">+ 新規記録</button>
+      ${renderRangeBox()}
       <div class="search-wrap">
         <span class="icon">🔍</span>
         <input type="text" id="search-input" placeholder="現場名・発注会社名で検索" value="${esc(state.query)}" />
@@ -356,6 +451,11 @@ function renderEntryList() {
     const inSite = (e.siteName || "").toLowerCase().includes(q);
     const inClient = (e.clientCompany || "").toLowerCase().includes(q);
     return inSite || inClient;
+  }).filter((e) => {
+    if (state.closeCompany && (e.clientCompany || "") !== state.closeCompany) return false;
+    if (state.rangeFrom && (e.date || "") < state.rangeFrom) return false;
+    if (state.rangeTo && (e.date || "") > state.rangeTo) return false;
+    return true;
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
 
   if (filtered.length === 0) {
@@ -368,7 +468,9 @@ function renderEntryList() {
     bySite[e.siteName].push(e);
   });
 
-  return `<ul class="entries">` + Object.keys(bySite).map((site) => `
+  const rangeOn = state.rangeFrom || state.rangeTo || state.closeCompany;
+  const sumHtml = rangeOn ? `<p class="range-sum">表示中: ${state.rangeFrom || state.rangeTo ? esc(mdLabel(state.rangeFrom) || "最初") + "〜" + esc(mdLabel(state.rangeTo) || "最新") : ""}${state.closeCompany ? " ・ " + esc(state.closeCompany) : ""} ・ ${filtered.length}件 ・ 合計 ${esc(fmtYen(filtered.reduce((a, e) => a + entryTotal(e.lineItems), 0)))}</p>` : "";
+  return sumHtml + `<ul class="entries">` + Object.keys(bySite).map((site) => `
     <li class="entry-card">
       <div class="entry-head">
         <div>
@@ -780,6 +882,7 @@ function bindEvents() {
     });
   });
 
+  bindRangeBox();
   const searchInput = document.getElementById("search-input");
   if (searchInput) {
     // 再描画で入力欄が作り直されるので、描画後に新しい入力欄へフォーカスを戻す。
