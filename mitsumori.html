@@ -286,6 +286,8 @@
   .prefix-field.staff-field input { font-size: 10px; color: #57534e; }
   .line-date { display: block; margin-top: 3px; font-size: 11px; width: 100%; box-sizing: border-box; }
   .print-line-date { display: none; }
+  .doc-row-click { cursor: pointer; }
+  .doc-row-click:hover { background: #fafaf9; }
   .print-date-value, .print-addr-value { display: none; }
   @media print {
     @page { size: A4 portrait; margin: var(--page-m); }
@@ -293,7 +295,7 @@
     .print-date-value { display: inline !important; font-size: 12px; color: #000; }
     .print-line-date { display: block !important; font-size: 10px; color: #292524; }
     .print-line-date:empty { display: none !important; }
-    .doc-meta .row.print-empty { display: none !important; }
+    .doc-meta .row.print-empty, .prefix-field.staff-field.print-empty { display: none !important; }
     .doc-card { position: relative; }
     .doc-top { height: var(--top-h); margin: 0; overflow: visible; }
     .doc-meta { position: absolute; right: 0; top: 0; width: 76mm; z-index: 1; }
@@ -987,6 +989,7 @@ function copyDocument(id) {
   state.workDate = "";
   state.startDate = "";
   state.costs = normCosts(null);
+  state.clientStaff = ""; // 担当者はその都度入力
   state.items = state.items.map((it) => Object.assign({}, it, { id: uid() }));
   saveDraft();
   render();
@@ -1380,7 +1383,7 @@ async function saveDocumentsToCloud(opts) {
 
 function renderDocRow(doc) {
   return `
-    <div class="doc-row">
+    <div class="doc-row doc-row-click" data-id="${doc.id}" title="タップで内容を開く">
       <div class="doc-row-info">
         <div class="doc-row-title">${esc(doc.docType)}${doc.docNumber ? " No." + esc(doc.docNumber) : ""}</div>
         <div class="doc-row-sub">📅 ${esc(doc.docDate || "")}${doc.workDate ? " ・ 🔧施工日 " + esc(doc.workDate) : (doc.docType === "請求書" ? ` ・ <span style="color:#dc2626;font-weight:700;">⚠施工日未入力</span>` : "")}${doc.siteName ? " ・ 📍 " + esc(doc.siteName) : ""}${docCostTotal(doc) > 0 ? " ・ 原価 " + esc(fmtYen(docCostTotal(doc))) : ""}</div>
@@ -1903,6 +1906,8 @@ function render() {
   let body = "";
   if (state.tab === "一覧") {
     body = renderListTab();
+  } else if (state.tab === "現場") {
+    body = renderHubTab();
   } else if (state.tab === "集計") {
     body = renderSummaryTab();
   } else {
@@ -1931,7 +1936,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-10-31 k</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-11-21 a</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
@@ -1942,11 +1947,262 @@ function renderHeader() {
     </header>`;
 }
 
+/* ===================== 現場・会社タブ ===================== */
+let hub = { view: "home", company: "", site: "", q: "", siteQ: "", more: 10, stack: [] };
+const NO_CLIENT = "(未設定)", NO_SITE = "(現場名なし)";
+function hubToday() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function coOf(d) { return d.clientName && d.clientName.trim() ? d.clientName.trim() : NO_CLIENT; }
+function stOf(d) { return d.siteName && d.siteName.trim() ? d.siteName.trim() : NO_SITE; }
+// 締め日文字列 → その月の締め日(日付)。末/末日/月末=月末
+function closingDayNum(str, y, m) {
+  const s = String(str || "").trim();
+  if (!s) return 0;
+  const last = new Date(y, m, 0).getDate();
+  if (/末/.test(s)) return last;
+  const n = parseInt(s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 65248)), 10);
+  if (!n || n < 1) return 0;
+  return Math.min(n, last);
+}
+function nextClosing(str) {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 2; i++) {
+    const base = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const day = closingDayNum(str, base.getFullYear(), base.getMonth() + 1);
+    if (!day) return null;
+    const dt = new Date(base.getFullYear(), base.getMonth(), day);
+    if (dt >= now) return { date: dt, days: Math.round((dt - now) / 86400000), label: (dt.getMonth() + 1) + "/" + dt.getDate() };
+  }
+  return null;
+}
+function closingText(cs) {
+  const parts = [];
+  parts.push("締め " + (cs.closingDay && String(cs.closingDay).trim() ? cs.closingDay : "未設定"));
+  if (cs.paymentDay && String(cs.paymentDay).trim()) parts.push("支払 " + cs.paymentDay);
+  return parts.join(" / ");
+}
+function buildSiteIndex() {
+  const map = {};
+  myDocs().forEach((d) => {
+    const c = coOf(d), s = stOf(d), k = c + "\u0001" + s;
+    const g = map[k] || (map[k] = { company: c, site: s, docs: [], last: "", hasInvoice: false, openInvoice: false, sales: 0, cost: 0, unpaid: 0, start: "", done: "" });
+    g.docs.push(d);
+    const dd = d.docDate || "";
+    if (dd > g.last) g.last = dd;
+    if (d.docType === "請求書") {
+      g.hasInvoice = true;
+      if (!d.workDate) g.openInvoice = true;
+      g.sales += docSales(d); g.cost += docCostTotal(d);
+      if (!d.paid) g.unpaid += d.grandTotal || 0;
+      if (d.startDate && (!g.start || d.startDate < g.start)) g.start = d.startDate;
+      if (d.workDate && d.workDate > g.done) g.done = d.workDate;
+    }
+  });
+  return Object.values(map).map((g) => {
+    g.status = !g.hasInvoice ? "見積のみ" : (g.openInvoice ? "進行中" : "完了");
+    return g;
+  });
+}
+function statusBadge(st) {
+  const col = st === "進行中" ? "#d97706;background:#fef3c7" : st === "完了" ? "#16a34a;background:#dcfce7" : "#57534e;background:#f5f5f4";
+  return `<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;color:${col};">${st}</span>`;
+}
+function hubSiteRow(g, showCompany) {
+  return `<div class="doc-row" style="cursor:pointer;" data-hub="site" data-co="${esc(g.company)}" data-st="${esc(g.site)}">
+    <div class="doc-row-info">
+      <div class="doc-row-title">📍 ${esc(g.site)} ${statusBadge(g.status)}</div>
+      <div class="doc-row-sub">${showCompany ? esc(g.company) + " ・ " : ""}最終 ${esc(g.last || "-")} ・ 書類${g.docs.length}件${g.unpaid > 0 ? ` ・ <span style="color:#dc2626;font-weight:700;">未入金 ${esc(fmtYen(g.unpaid))}</span>` : ""}</div>
+    </div><div style="color:#a8a29e;">›</div></div>`;
+}
+function hubCompanyRow(c, extra) {
+  return `<div class="doc-row" style="cursor:pointer;" data-hub="company" data-co="${esc(c)}">
+    <div class="doc-row-info"><div class="doc-row-title">🏢 ${esc(c)}</div>${extra ? `<div class="doc-row-sub">${extra}</div>` : ""}</div>
+    <div style="color:#a8a29e;">›</div></div>`;
+}
+function renderThisMonth() {
+  const ym = hubToday().slice(0, 7);
+  const map = {};
+  myDocs().forEach((d) => {
+    if (d.docType !== "請求書" || String(d.docDate || "").slice(0, 7) !== ym) return;
+    const c = coOf(d);
+    const g = map[c] || (map[c] = { count: 0, total: 0, unpaid: 0 });
+    g.count++; g.total += d.grandTotal || 0;
+    if (!d.paid) g.unpaid += d.grandTotal || 0;
+  });
+  // 締め日を設定済みの会社も表示(今月まだ請求がなくても締め日が分かるように)
+  const myCos = {};
+  myDocs().forEach((d) => { myCos[coOf(d)] = 1; });
+  Object.keys(state.clientSettings || {}).forEach((c) => {
+    const cs = state.clientSettings[c];
+    if (myCos[c] && cs && cs.closingDay && String(cs.closingDay).trim() && !map[c]) map[c] = { count: 0, total: 0, unpaid: 0 };
+  });
+  const rows = Object.keys(map).map((c) => {
+    const cs = getClientSetting(c), nx = nextClosing(cs.closingDay);
+    return { c, cs, nx, g: map[c] };
+  }).sort((a, b) => (a.nx ? a.nx.days : 999) - (b.nx ? b.nx.days : 999) || a.c.localeCompare(b.c, "ja"));
+  const sum = rows.reduce((s, r) => ({ n: s.n + r.g.count, t: s.t + r.g.total, u: s.u + r.g.unpaid }), { n: 0, t: 0, u: 0 });
+  const m = parseInt(ym.slice(5, 7), 10);
+  if (!rows.length) return `<div class="card"><h2 style="font-size:15px;margin:0 0 8px;">📅 ${m}月の請求と締め日</h2><p class="empty-note">データなし</p></div>`;
+  const body = rows.map((r) => {
+    const nxt = r.nx ? `<span style="font-weight:700;color:${r.nx.days <= 3 ? "#dc2626" : "#1c1917"};">次の締め ${r.nx.label}(${r.nx.days === 0 ? "今日" : "あと" + r.nx.days + "日"})</span>` : `<span style="color:#a8a29e;">締め日未設定</span>`;
+    return `<div class="doc-row" style="cursor:pointer;" data-hub="company" data-co="${esc(r.c)}">
+      <div class="doc-row-info">
+        <div class="doc-row-title">🏢 ${esc(r.c)}</div>
+        <div class="doc-row-sub">${nxt} ・ ${esc(closingText(r.cs))}</div>
+        <div class="doc-row-sub">請求 ${r.g.count}件 ${esc(fmtYen(r.g.total))}${r.g.unpaid > 0 ? ` ・ <span style="color:#dc2626;font-weight:700;">未入金 ${esc(fmtYen(r.g.unpaid))}</span>` : ""}</div>
+      </div><div style="color:#a8a29e;">›</div></div>`;
+  }).join("");
+  return `<div class="card"><h2 style="font-size:15px;margin:0 0 4px;">📅 ${m}月の請求と締め日</h2>
+    <p style="font-size:12px;color:#57534e;margin:0 0 8px;">合計 ${sum.n}件 ${esc(fmtYen(sum.t))}${sum.u > 0 ? ` ・ 未入金 ${esc(fmtYen(sum.u))}` : ""}(締め日が近い順)</p>${body}</div>`;
+}
+function hubSearchResults() {
+  const q = (hub.q || "").trim().toLowerCase();
+  if (!q) return "";
+  const idx = buildSiteIndex();
+  const cos = {};
+  idx.forEach((g) => { cos[g.company] = 1; });
+  const cl = Object.keys(cos).filter((c) => c.toLowerCase().indexOf(q) !== -1).slice(0, 8);
+  const all = idx.filter((g) => g.site.toLowerCase().indexOf(q) !== -1 || g.company.toLowerCase().indexOf(q) !== -1)
+    .sort((a, b) => (b.last || "").localeCompare(a.last || ""));
+  const st = all.slice(0, 10);
+  if (!cl.length && !st.length) return `<p class="empty-note">見つかりません</p>`;
+  return (cl.length ? `<div class="hub-h">会社</div>` + cl.map((c) => hubCompanyRow(c)).join("") : "") +
+    (st.length ? `<div class="hub-h">現場(新しい順${all.length > st.length ? "・上位" + st.length + "件/全" + all.length + "件。絞り込むには続けて入力" : ""})</div>` + st.map((g) => hubSiteRow(g, true)).join("") : "");
+}
+function renderHubHome() {
+  const idx = buildSiteIndex();
+  const open = idx.filter((g) => g.status === "進行中").sort((a, b) => (b.last || "").localeCompare(a.last || ""));
+  const recent = idx.sort((a, b) => (b.last || "").localeCompare(a.last || "")).slice(0, 6);
+  return renderThisMonth() + `
+    <div class="card"><h2 style="font-size:15px;margin:0 0 8px;">🔍 会社・現場を探す</h2>
+      <input type="text" id="hub-search" placeholder="会社名や現場名の一部を入力" value="${esc(hub.q || "")}" />
+      <div id="hub-search-results" style="margin-top:8px;">${hubSearchResults()}</div></div>
+    <div class="card"><h2 style="font-size:15px;margin:0 0 8px;">🚧 進行中の現場(施工日未入力)${open.length ? "(" + open.length + "件)" : ""}</h2>
+      ${open.length ? open.slice(0, 8).map((g) => hubSiteRow(g, true)).join("") + (open.length > 8 ? `<p style="font-size:12px;color:#78716c;margin:6px 0 0;">ほか${open.length - 8}件。上の検索で探せます</p>` : "") : `<p class="empty-note">なし</p>`}</div>
+    <div class="card"><h2 style="font-size:15px;margin:0 0 8px;">🕒 最近の現場</h2>
+      ${recent.length ? recent.map((g) => hubSiteRow(g, true)).join("") : `<p class="empty-note">データなし</p>`}</div>`;
+}
+function renderHubCompany() {
+  const c = hub.company, cs = getClientSetting(c), nx = nextClosing(cs.closingDay);
+  const docs = myDocs().filter((d) => coOf(d) === c);
+  const fy = fyOf(hubToday());
+  let sales = 0, unpaid = 0, unpaidN = 0;
+  docs.forEach((d) => {
+    if (d.docType !== "請求書") return;
+    if (fyOf(periodDate(d)) === fy) sales += docSales(d);
+    if (!d.paid) { unpaid += d.grandTotal || 0; unpaidN++; }
+  });
+  const q = (hub.siteQ || "").trim().toLowerCase();
+  const sites = buildSiteIndex().filter((g) => g.company === c && (!q || g.site.toLowerCase().indexOf(q) !== -1))
+    .sort((a, b) => (b.last || "").localeCompare(a.last || ""));
+  return `<div class="card">
+      <h2 style="font-size:17px;margin:0 0 6px;">🏢 ${esc(c)}</h2>
+      <p style="font-size:13px;margin:0 0 4px;">${esc(closingText(cs))}${nx ? ` ・ <b>次の締め ${nx.label}(${nx.days === 0 ? "今日" : "あと" + nx.days + "日"})</b>` : ""}</p>
+      <p style="font-size:13px;margin:0;">${esc(fyLabel(fy))} 売上 <b>${esc(fmtYen(sales))}</b> ・ 未入金 <b style="color:${unpaid > 0 ? "#dc2626" : "inherit"};">${esc(fmtYen(unpaid))}</b>(${unpaidN}件)</p>${hubNewButtons(c, "")}</div>
+    <div class="card"><h2 style="font-size:15px;margin:0 0 8px;">📍 現場(${sites.length}件・新しい順)</h2>
+      <input type="text" id="hub-site-q" placeholder="この会社の現場を絞り込み" value="${esc(hub.siteQ || "")}" />
+      <div id="hub-site-list" style="margin-top:8px;">${renderHubSiteList(sites)}</div></div>`;
+}
+function renderHubSiteList(sites) {
+  if (!sites.length) return `<p class="empty-note">該当なし</p>`;
+  const shown = sites.slice(0, hub.more);
+  return shown.map((g) => hubSiteRow(g, false)).join("") +
+    (sites.length > shown.length ? `<button class="hub-more" data-hub="more" style="width:100%;margin-top:8px;padding:8px;border:1px solid #e7e5e4;background:#fff;border-radius:8px;font-weight:700;cursor:pointer;">さらに表示(残り${sites.length - shown.length}件)</button>` : "");
+}
+function renderHubSite() {
+  const g = buildSiteIndex().find((x) => x.company === hub.company && x.site === hub.site);
+  if (!g) return `<div class="card"><p class="empty-note">この現場の書類は見つかりません</p></div>`;
+  const docs = g.docs.slice().sort((a, b) => (b.docDate || "").localeCompare(a.docDate || ""));
+  return `<div class="card">
+      <h2 style="font-size:17px;margin:0 0 6px;">📍 ${esc(g.site)} ${statusBadge(g.status)}</h2>
+      <p style="font-size:13px;margin:0 0 6px;"><a href="#" data-hub="company" data-co="${esc(g.company)}" style="color:#2563eb;font-weight:700;">🏢 ${esc(g.company)}</a></p>
+      <p style="font-size:13px;margin:0 0 4px;">着工日 ${esc(g.start || "-")} ・ 施工日 ${g.status === "完了" ? esc(g.done || "-") : "-"}</p>
+      <p style="font-size:13px;margin:0;">売上 <b>${esc(fmtYen(g.sales))}</b> ・ 原価 ${esc(fmtYen(g.cost))} ・ 粗利 <b>${esc(fmtYen(g.sales - g.cost))}</b>${g.unpaid > 0 ? ` ・ <b style="color:#dc2626;">未入金 ${esc(fmtYen(g.unpaid))}</b>` : ""}</p>${hubNewButtons(g.company, g.site)}</div>
+    <div class="card"><h2 style="font-size:15px;margin:0 0 8px;">📄 この現場の書類(${docs.length}件)</h2>${docs.map((d) => renderDocRow(d)).join("")}</div>`;
+}
+function renderHubTab() {
+  let body = "", head = "";
+  if (hub.view === "home") body = renderHubHome();
+  else {
+    head = `<div class="no-print" style="margin-bottom:10px;"><button data-hub="back" style="padding:8px 14px;border:1px solid #e7e5e4;background:#fff;border-radius:8px;font-weight:700;cursor:pointer;">‹ 戻る</button>
+      <button data-hub="home" style="padding:8px 14px;border:1px solid #e7e5e4;background:#fff;border-radius:8px;font-weight:700;cursor:pointer;margin-left:6px;">🏠 トップ</button></div>`;
+    body = hub.view === "company" ? renderHubCompany() : renderHubSite();
+  }
+  return `<style>.hub-h{font-size:12px;font-weight:700;color:#78716c;margin:10px 0 4px;}</style>` + head + body;
+}
+// 会社・現場を選んで、住所などが入った状態の新しい書類を作る(担当者は空)
+function newDocFor(co, st, type) {
+  undoFlush();
+  const known = getKnownClients().find((c) => c.name === co);
+  state = Object.assign({}, state, {
+    editingDocId: null, docType: type, tab: "作成", docDate: todayStr(), workDate: "", startDate: "", costs: normCosts(null),
+    clientName: co === NO_CLIENT ? "" : co, clientHonorific: known ? known.honorific : "様",
+    clientPostal: known ? stripPostalMark(known.postal) : "", clientAddress: known ? known.address : "",
+    clientTel: known ? known.tel : "", clientFax: known ? known.fax : "", clientStaff: "",
+    siteName: !st || st === NO_SITE ? "" : st, miscExpense: "", miscNote: "", eightPercentAmount: "", items: [newLineItem()],
+  });
+  state.docNumber = getNextDocNumber(type);
+  saveDraft();
+  render();
+  window.scrollTo(0, 0);
+}
+function hubNewButtons(co, st) {
+  const b = (type) => `<button data-hub="new" data-type="${type}" data-co="${esc(co)}" data-st="${esc(st || "")}" style="flex:1;padding:9px;border:none;background:#1c1917;color:#fff;border-radius:8px;font-weight:700;cursor:pointer;">＋ ${type}を作成</button>`;
+  return `<div class="no-print" style="display:flex;gap:8px;margin-top:10px;">${b("見積書")}${b("請求書")}</div>`;
+}
+function hubGo(view, company, site) {
+  hub.stack.push({ view: hub.view, company: hub.company, site: hub.site, siteQ: hub.siteQ, more: hub.more });
+  hub.view = view; hub.company = company || ""; hub.site = site || ""; hub.siteQ = ""; hub.more = 10;
+  render(); window.scrollTo(0, 0);
+}
+function bindHub() {
+  document.querySelectorAll("[data-hub]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest("button[data-action]")) return;
+      e.preventDefault();
+      const t = el.dataset.hub;
+      if (t === "company") hubGo("company", el.dataset.co);
+      else if (t === "site") hubGo("site", el.dataset.co, el.dataset.st);
+      else if (t === "back") {
+        const p = hub.stack.pop();
+        if (p) Object.assign(hub, p); else hub.view = "home";
+        render(); window.scrollTo(0, 0);
+      } else if (t === "home") { hub.view = "home"; hub.stack = []; render(); window.scrollTo(0, 0); }
+      else if (t === "more") { hub.more += 20; render(); }
+      else if (t === "new") newDocFor(el.dataset.co, el.dataset.st, el.dataset.type);
+    });
+  });
+  const s = document.getElementById("hub-search");
+  if (s) s.addEventListener("input", (e) => {
+    hub.q = e.target.value;
+    const r = document.getElementById("hub-search-results");
+    if (r) { r.innerHTML = hubSearchResults(); bindHubIn(r); }
+  });
+  const sq = document.getElementById("hub-site-q");
+  if (sq) sq.addEventListener("input", (e) => {
+    hub.siteQ = e.target.value; hub.more = 10;
+    const q = hub.siteQ.trim().toLowerCase();
+    const sites = buildSiteIndex().filter((g) => g.company === hub.company && (!q || g.site.toLowerCase().indexOf(q) !== -1)).sort((a, b) => (b.last || "").localeCompare(a.last || ""));
+    const r = document.getElementById("hub-site-list");
+    if (r) { r.innerHTML = renderHubSiteList(sites); bindHubIn(r); }
+  });
+}
+function bindHubIn(root) {
+  root.querySelectorAll("[data-hub]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const t = el.dataset.hub;
+      if (t === "company") hubGo("company", el.dataset.co);
+      else if (t === "site") hubGo("site", el.dataset.co, el.dataset.st);
+      else if (t === "more") { hub.more += 20; render(); }
+    });
+  });
+}
+
 function renderMainTabs() {
   return `
     <div class="tabs no-print">
       <button data-action="main-tab" data-val="作成" class="${state.tab === "作成" ? "active" : ""}">作成</button>
       <button data-action="main-tab" data-val="一覧" class="${state.tab === "一覧" ? "active" : ""}">一覧</button>
+      <button data-action="main-tab" data-val="現場" class="${state.tab === "現場" ? "active" : ""}">現場・会社</button>
       <button data-action="main-tab" data-val="集計" class="${state.tab === "集計" ? "active" : ""}">集計</button>
     </div>`;
 }
@@ -2214,6 +2470,13 @@ function updateTotalsDom() {
 
 function bindDocRowEvents(root) {
   const scope = root || document;
+  // 行のどこをタップしても、1回で内容(書類)が開く
+  scope.querySelectorAll(".doc-row-click").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest("button, a, input, select")) return;
+      openDocument(row.dataset.id);
+    });
+  });
   scope.querySelectorAll('[data-action="open-doc"]').forEach((btn) => {
     btn.addEventListener("click", () => openDocument(btn.dataset.id));
   });
@@ -2240,7 +2503,7 @@ function bindEvents() {
       state.tab = el.dataset.val;
       saveDraft();
       render();
-      if ((state.tab === "一覧" || state.tab === "集計") && API_URL) {
+      if ((state.tab === "一覧" || state.tab === "集計" || state.tab === "現場") && API_URL) {
         await loadDocumentsFromCloud(true);
       }
     });
@@ -2277,6 +2540,7 @@ function bindEvents() {
     });
   }
   bindDocRowEvents(document);
+  bindHub();
 
   // 集計タブ
   const fiscalEl = document.getElementById("fiscal-end-select");
@@ -2418,6 +2682,24 @@ function bindEvents() {
       saveDraft();
     });
   }
+
+  // 現場名が過去の書類と同じで、宛先がまだ空なら、その会社の住所・電話・FAXを自動入力(担当者は入れない)
+  const siteNameEl = document.getElementById("site-input");
+  if (siteNameEl) siteNameEl.addEventListener("input", (e) => {
+    const v = e.target.value.trim();
+    if (!v || state.clientName.trim()) return;
+    const hit = myDocs().filter((d) => (d.siteName || "").trim() === v && (d.clientName || "").trim())
+      .sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""))[0];
+    if (!hit) return;
+    const known = getKnownClients().find((c) => c.name === hit.clientName.trim());
+    if (!known) return;
+    state.clientName = known.name; state.clientPostal = stripPostalMark(known.postal); state.clientAddress = known.address;
+    state.clientTel = known.tel; state.clientFax = known.fax; state.clientHonorific = known.honorific;
+    saveDraft();
+    render();
+    const n = document.getElementById("site-input");
+    if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+  });
 
   document.querySelectorAll('[data-bank-idx]').forEach((el) => {
     el.addEventListener("input", (e) => {
@@ -2601,10 +2883,15 @@ function bindEvents() {
 }
 
 // PDF保存: 印刷画面の保存先を「PDFに保存」にするだけで済むよう、ファイル名を「請求書_No1_会社名」にしてから開く
+// ファイル名に使えない文字・LINEなどで開けなくなる特殊文字(㈱ など)を、普通の文字に直す
+function safeFileName(name) {
+  return String(name || "").normalize("NFKC").replace(/[\\/:*?"<>|\s]+/g, "_").replace(/[\u0000-\u001f]/g, "").slice(0, 60);
+}
+
 function savePdf() {
   const base = [state.docType, state.docNumber ? "No" + state.docNumber : "", state.clientName || ""].filter(Boolean).join("_");
   const oldTitle = document.title;
-  document.title = (base || state.docType).replace(/[\\/:*?"<>|]/g, "_");
+  document.title = safeFileName(base || state.docType);
   const restore = () => { document.title = oldTitle; window.removeEventListener("afterprint", restore); };
   window.addEventListener("afterprint", restore);
   showToast("印刷画面で、送信先(プリンター)を「PDFに保存」にして保存してください");
@@ -2669,6 +2956,8 @@ function preparePrint() {
     const sp = inp.nextElementSibling;
     if (sp && sp.classList.contains("print-line-date")) sp.textContent = shortDate(inp.value);
   });
+  const staffRow = document.querySelector(".prefix-field.staff-field");
+  if (staffRow) staffRow.classList.toggle("print-empty", !(document.getElementById("client-staff-input") || {}).value);
   // 請求先住所(入力欄だと長いと切れるので、折り返せる文字にして印刷)
   const addrInp = document.getElementById("client-address-input");
   if (addrInp) {
