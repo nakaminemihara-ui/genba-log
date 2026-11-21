@@ -471,6 +471,11 @@ function mapGenbaLineItem(it, entryDate) {
   if (WORK_TYPES.indexOf(work) === -1) work = "自由入力";
   const workCustom = work === "自由入力" ? (it.work || "") : "";
   const noteParts = [];
+  // 径・長さ・幅などが入っているのに、この作業内容では入力欄がない場合は、備考に残して取りこぼしを防ぐ
+  if (work !== "斫り" && !hasCoreSize(work)) {
+    const sz = [it.diameter, it.length, it.width, it.depth, it.haturiLength].filter((x) => x != null && String(x) !== "");
+    if (sz.length) noteParts.push("サイズ:" + sz.join("×"));
+  }
   if (it.note) noteParts.push(it.note);
   const isCoreW = hasCoreSize(work), isHatsuriW = work === "斫り";
   // 作業伝票のコア抜きは「Φ×長さ(=厚み)」で入力されているので、見積書側の「×厚」に入れる
@@ -496,11 +501,22 @@ function mapGenbaLineItem(it, entryDate) {
 }
 
 // 作業伝票読み込みモーダルの状態(保存はしない。画面表示のみに使う)
-let importModal = { show: false, loading: false, error: "", entries: [], query: "" };
+function monthRange(offset) {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + (offset || 0));
+  const y = d.getFullYear(), m = d.getMonth();
+  const pad = (n) => String(n).padStart(2, "0");
+  const last = new Date(y, m + 1, 0).getDate();
+  return { from: y + "-" + pad(m + 1) + "-01", to: y + "-" + pad(m + 1) + "-" + pad(last) };
+}
+function newImportModal(extra) {
+  const r = monthRange(0);
+  return Object.assign({ show: false, loading: false, error: "", entries: [], query: "", from: r.from, to: r.to, sel: {} }, extra || {});
+}
+let importModal = newImportModal();
 
 async function openImportModal() {
   const url = GENBA_LOG_API_URLS[state.issuerPreset];
-  importModal = { show: true, loading: true, error: "", entries: [], query: "" };
+  importModal = newImportModal({ show: true, loading: true });
   render();
   if (!url) {
     importModal.loading = false;
@@ -511,7 +527,9 @@ async function openImportModal() {
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("http " + res.status);
-    const data = await res.json();
+    // 文字コードの取り違え(文字化け)を防ぐため、UTF-8として明示的に読む
+    const buf = await res.arrayBuffer();
+    const data = JSON.parse(new TextDecoder("utf-8").decode(buf));
     const entries = Array.isArray(data) ? data : [];
     entries.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     importModal.entries = entries;
@@ -524,22 +542,8 @@ async function openImportModal() {
 }
 
 function closeImportModal() {
-  importModal = { show: false, loading: false, error: "", entries: [], query: "" };
+  importModal = newImportModal();
   render();
-}
-
-function bindImportEntryButtons() {
-  document.querySelectorAll('[data-action="import-genba-site"]').forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const site = btn.dataset.site;
-      const ids = importModal.entries.filter((e) => (e.siteName || "") === site).map((e) => e.id);
-      if (ids.length > 1 && !confirm("「" + (site || "現場名なし") + "」の作業伝票 " + ids.length + "件を、まとめて取り込みます。よろしいですか?")) return;
-      importGenbaEntries(ids);
-    });
-  });
-  document.querySelectorAll('[data-action="import-genba-entry"]').forEach((btn) => {
-    btn.addEventListener("click", () => { importGenbaEntry(btn.dataset.id); });
-  });
 }
 
 function shortDate(v) { const m = String(v || "").match(/(\d{4})-(\d{2})-(\d{2})/); return m ? parseInt(m[2], 10) + "/" + parseInt(m[3], 10) : ""; }
@@ -548,17 +552,70 @@ function normDate(v) {
   return m ? m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0") : "";
 }
 
+// ---- 取り込み済みの判定(書類に記録した伝票IDから調べる。端末をまたいで共有される) ----
+function importedMap() {
+  const map = {};
+  (state.documents || []).forEach((d) => {
+    (d.importedEntryIds || []).forEach((id) => { map[id] = d.docType + (d.docNumber ? " No." + d.docNumber : ""); });
+  });
+  (state.importedEntryIds || []).forEach((id) => { if (!map[id]) map[id] = "作成中の書類"; });
+  return map;
+}
+
+// ---- 文字化け・内容の相違チェック ----
+const MOJIBAKE_RE = / |[ÃÂãâ][\u0080-¿]|ï¿½|â€/;
+function entryTexts(e) {
+  const t = [e.siteName, e.clientCompany, e.date];
+  (e.lineItems || []).forEach((it) => { t.push(it.work, it.location, it.note, it.unit, it.qty, it.price, it.diameter, it.length, it.width, it.depth, it.haturiLength); });
+  return t.map((x) => String(x == null ? "" : x));
+}
+function entryLooksGarbled(e) { return entryTexts(e).some((x) => MOJIBAKE_RE.test(x)); }
+// 取り込んだ結果が、作業伝票の内容と一致しているか照合する。違いがあれば説明の一覧を返す
+function verifyMapped(entry, mappedItems) {
+  const diffs = [];
+  const src = entry.lineItems || [];
+  const tag = (entry.siteName || "現場名なし") + " " + (entry.date || "");
+  if (src.length !== mappedItems.length) diffs.push(tag + ": 明細の行数が違います(伝票" + src.length + "行→取り込み" + mappedItems.length + "行)");
+  src.forEach((s, i) => {
+    const m = mappedItems[i]; if (!m) return;
+    const n = tag + " " + (i + 1) + "行目: ";
+    if (m.label !== (s.location || "")) diffs.push(n + "作業場所が違います");
+    if (m.price !== String(s.price == null ? "" : s.price)) diffs.push(n + "単価が違います");
+    if (m.qty !== String(s.qty == null || s.qty === "" ? "1" : s.qty)) diffs.push(n + "数量が違います");
+    if (s.unit && m.unit !== s.unit) diffs.push(n + "単位が違います(" + s.unit + "→" + m.unit + ")");
+    const w = GENBA_WORK_TYPE_MAP[s.work] || s.work;
+    if (WORK_TYPES.indexOf(w) !== -1) { if (m.work !== w) diffs.push(n + "作業内容が違います"); }
+    else if (!(m.work === "自由入力" && m.workCustom === (s.work || ""))) diffs.push(n + "作業内容が違います");
+    if (s.note && String(m.note).indexOf(String(s.note)) === -1) diffs.push(n + "備考が違います");
+    if (m.work === "斫り") {
+      if (m.width !== String(s.width || "") || m.depth !== String(s.depth || "") || m.length !== String(s.haturiLength || s.length || "")) diffs.push(n + "斫りの寸法が違います");
+    } else if (hasCoreSize(m.work)) {
+      if (m.diameter !== String(s.diameter || "") || m.depth !== String(s.depth || s.length || "")) diffs.push(n + "コアの径・厚みが違います");
+    }
+  });
+  return diffs;
+}
+
 function importGenbaEntry(entryId) { importGenbaEntries([entryId]); }
 
-// 作業伝票を1件以上まとめて、いま開いている書類に取り込む(現場ごとの一括取り込みにも使う)
+// 作業伝票を1件以上まとめて、いま開いている書類に取り込む(複数選択・現場ごとの一括取り込みにも使う)
 function importGenbaEntries(ids) {
   undoFlush();
   const entries = ids.map((id) => importModal.entries.find((e) => e.id === id)).filter(Boolean)
     .sort((a, b) => normDate(a.date).localeCompare(normDate(b.date)));
   if (!entries.length) return;
+  const done = importedMap();
+  const already = entries.filter((e) => done[e.id]);
+  if (already.length && !confirm("すでに取り込み済みの伝票が " + already.length + "件 含まれています(" + already.map((e) => (e.siteName || "") + " " + (e.date || "")).slice(0, 3).join("、") + (already.length > 3 ? " ほか" : "") + ")。\nもう一度取り込むと明細が重複します。取り込みますか?")) return;
+  const garbled = entries.filter(entryLooksGarbled);
+  if (garbled.length && !confirm("文字化けの可能性がある伝票が " + garbled.length + "件 あります(" + garbled.map((e) => (e.siteName || "") + " " + (e.date || "")).slice(0, 3).join("、") + ")。\nこのまま取り込みますか?(作業伝票アプリ側の内容も確認してください)")) return;
+
   let mapped = [];
+  let diffs = [];
   entries.forEach((entry) => {
-    mapped = mapped.concat((entry.lineItems || []).map((li) => mapGenbaLineItem(li, entry.date)).filter((it) => it.qty !== "" || it.price !== "" || it.label || it.workCustom));
+    const items = (entry.lineItems || []).map((li) => mapGenbaLineItem(li, entry.date));
+    diffs = diffs.concat(verifyMapped(entry, items));
+    mapped = mapped.concat(items);
   });
   if (mapped.length === 0) mapped.push(newLineItem());
 
@@ -568,11 +625,7 @@ function importGenbaEntries(ids) {
   const isBlankState = state.items.length === 1 && !first.price && !first.label && !first.workCustom &&
     !first.note && !first.diameter && !first.length && !first.width &&
     (first.qty === "" || first.qty === "1") && first.work === WORK_TYPES[0];
-  if (isBlankState) {
-    state.items = mapped;
-  } else {
-    state.items = state.items.concat(mapped);
-  }
+  state.items = isBlankState ? mapped : state.items.concat(mapped);
 
   const dates = entries.map((e) => normDate(e.date)).filter(Boolean).sort();
   if (dates.length) {
@@ -581,72 +634,168 @@ function importGenbaEntries(ids) {
     if (!state.workDate || last > state.workDate) state.workDate = last;
     if (!state.startDate || firstD < state.startDate) state.startDate = firstD;
   }
-  const e0 = entries[0];
-  if (!state.siteName.trim()) state.siteName = e0.siteName || "";
+  if (!state.siteName.trim()) state.siteName = entries[0].siteName || "";
   if (!state.clientName.trim()) {
     const ec = entries.map((e) => e.clientCompany).find(Boolean);
-    if (ec) state.clientName = ec;
+    if (ec) {
+      state.clientName = ec;
+      // 過去に作った書類に同じ会社があれば、住所・電話・FAXを自動入力(担当者は入れない)
+      const known = getKnownClients().find((c) => c.name === ec.trim());
+      if (known) {
+        state.clientPostal = stripPostalMark(known.postal); state.clientAddress = known.address;
+        state.clientTel = known.tel; state.clientFax = known.fax; state.clientHonorific = known.honorific;
+      }
+    }
   }
+  // 取り込み済みの印(この書類を保存すると、各伝票が「済」と表示される)
+  const set = new Set(state.importedEntryIds || []);
+  entries.forEach((e) => set.add(e.id));
+  state.importedEntryIds = Array.from(set);
 
   closeImportModal();
   saveDraft();
   render();
-  showToast(entries.length > 1 ? entries.length + "件の作業伝票を取り込みました" : "作業伝票を取り込みました");
+  if (diffs.length) {
+    alert("⚠ 取り込んだ内容が作業伝票と違う箇所があります。必ず確認してください。\n\n" + diffs.slice(0, 12).join("\n") + (diffs.length > 12 ? "\nほか" + (diffs.length - 12) + "件" : ""));
+  } else {
+    showToast(entries.length + "件の作業伝票を取り込みました(内容を照合して一致を確認)。保存すると「済」になります");
+  }
 }
+
+// ---- 取り込み画面 ----
+function importFiltered() {
+  const q = (importModal.query || "").toLowerCase();
+  const from = importModal.from || "0000-00-00", to = importModal.to || "9999-99-99";
+  return importModal.entries.filter((e) => {
+    const d = normDate(e.date);
+    if (d && (d < from || d > to)) return false;
+    if (!d && (importModal.from || importModal.to)) return false;
+    if (!q) return true;
+    return (e.siteName || "").toLowerCase().indexOf(q) !== -1 || (e.clientCompany || "").toLowerCase().indexOf(q) !== -1;
+  });
+}
+function importSelIds() { return Object.keys(importModal.sel).filter((k) => importModal.sel[k]); }
 
 function renderImportModal() {
   if (!importModal.show) return "";
-  const body = renderImportModalListOnly();
+  const inp = "font-size:13px;padding:5px 6px;border:1px solid #d6d3d1;border-radius:6px;";
+  const qb = "font-size:12px;background:#fff;border:1px solid #d6d3d1;border-radius:6px;padding:5px 8px;cursor:pointer;";
   return `
-    <div class="no-print" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;">
-      <div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e7e5e4;flex-shrink:0;">
+    <div class="no-print" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:12px;">
+      <div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e7e5e4;flex-shrink:0;">
           <p style="font-size:14px;font-weight:600;margin:0;">作業伝票から読み込み (${esc(state.issuerPreset)})</p>
           <button type="button" data-action="close-import-modal" style="background:none;border:none;font-size:20px;line-height:1;cursor:pointer;color:#78716c;">×</button>
         </div>
-        <div style="padding:10px 16px;flex-shrink:0;">
-          <input type="text" id="import-search-input" placeholder="現場名・取引先で検索" value="${esc(importModal.query)}" style="width:100%;box-sizing:border-box;font-size:13px;padding:6px 8px;border:1px solid #d6d3d1;border-radius:6px;" />
+        <div style="padding:10px 16px 6px;flex-shrink:0;">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+            <span style="font-size:12px;color:#57534e;">期間</span>
+            <input type="date" id="import-from" value="${esc(importModal.from)}" style="${inp}" />
+            <span>〜</span>
+            <input type="date" id="import-to" value="${esc(importModal.to)}" style="${inp}" />
+            <button type="button" data-import-range="0" style="${qb}">今月</button>
+            <button type="button" data-import-range="-1" style="${qb}">先月</button>
+          </div>
+          <input type="text" id="import-search-input" placeholder="現場名・取引先で絞り込み" value="${esc(importModal.query)}" style="width:100%;box-sizing:border-box;${inp}" />
         </div>
-        <div id="import-modal-list" style="padding:0 16px 16px;overflow-y:auto;flex:1;">${body}</div>
+        <div style="padding:0 16px 6px;display:flex;gap:6px;align-items:center;flex-shrink:0;">
+          <button type="button" data-import-selall="1" style="${qb}">未取り込みをすべて選択</button>
+          <button type="button" data-import-selall="0" style="${qb}">選択解除</button>
+        </div>
+        <div id="import-modal-list" style="padding:0 16px 8px;overflow-y:auto;flex:1;">${renderImportModalListOnly()}</div>
+        <div id="import-footer" style="padding:10px 16px;border-top:1px solid #e7e5e4;flex-shrink:0;">${renderImportFooter()}</div>
       </div>
     </div>`;
 }
 
+function renderImportFooter() {
+  const n = importSelIds().length;
+  return `<button type="button" data-action="import-selected" ${n ? "" : "disabled"} style="width:100%;padding:11px;font-size:14px;font-weight:700;border:none;border-radius:8px;color:#fff;background:${n ? "#2563eb" : "#a8a29e"};cursor:${n ? "pointer" : "default"};">選んだ ${n}件を取り込む</button>`;
+}
+
 function renderImportModalListOnly() {
-  const q = (importModal.query || "").toLowerCase();
-  const filtered = importModal.entries.filter((e) => {
-    if (!q) return true;
-    return (e.siteName || "").toLowerCase().indexOf(q) !== -1 ||
-      (e.clientCompany || "").toLowerCase().indexOf(q) !== -1;
-  });
   if (importModal.loading) return `<p style="padding:20px;text-align:center;color:#78716c;">読み込み中…</p>`;
   if (importModal.error) return `<p style="padding:20px;text-align:center;color:#dc2626;">${esc(importModal.error)}</p>`;
-  if (filtered.length === 0) return `<p style="padding:20px;text-align:center;color:#78716c;">該当する作業伝票の記録がありません。</p>`;
-  // 現場ごとにまとめて表示(一括取り込みボタン付き)
+  const filtered = importFiltered();
+  if (filtered.length === 0) return `<p style="padding:20px;text-align:center;color:#78716c;">この期間の作業伝票はありません。期間を変えてください。</p>`;
+  const done = importedMap();
   const groups = {};
   filtered.forEach((e) => { const k = e.siteName || ""; (groups[k] = groups[k] || []).push(e); });
   const keys = Object.keys(groups).sort((x, y) => (groups[y][0].date || "").localeCompare(groups[x][0].date || ""));
   return keys.map((k) => {
-    const list = groups[k];
-    const total = importModal.entries.filter((e) => (e.siteName || "") === k).length;
+    const list = groups[k].slice().sort((a, b) => normDate(a.date).localeCompare(normDate(b.date)));
     const head = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0 6px;">
-        <div style="font-size:13px;font-weight:700;min-width:0;">📍 ${esc(k || "(現場名なし)")} <span style="font-size:11px;color:#78716c;font-weight:400;">${total}件</span></div>
-        <button type="button" data-action="import-genba-site" data-site="${esc(k)}" style="flex-shrink:0;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;">この現場を一括取り込み</button>
+        <div style="font-size:13px;font-weight:700;min-width:0;">📍 ${esc(k || "(現場名なし)")} <span style="font-size:11px;color:#78716c;font-weight:400;">${list.length}件</span></div>
+        <button type="button" data-import-site="${esc(k)}" style="flex-shrink:0;font-size:12px;background:#fff;color:#2563eb;border:1px solid #2563eb;border-radius:6px;padding:5px 9px;cursor:pointer;">この現場を選択</button>
       </div>`;
     const rows = list.map((e) => {
       const workSummary = (e.lineItems || []).map((it) => it.work).filter(Boolean).slice(0, 3).join("・");
+      const isDone = done[e.id];
+      const bad = entryLooksGarbled(e);
+      const checked = importModal.sel[e.id] ? "checked" : "";
       return `
-      <div style="border:1px solid #e7e5e4;border-radius:8px;padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <div style="min-width:0;">
+      <label style="border:1px solid ${isDone ? "#d6d3d1" : "#e7e5e4"};background:${isDone ? "#f5f5f4" : "#fff"};border-radius:8px;padding:8px 10px;margin-bottom:6px;display:flex;align-items:center;gap:10px;cursor:pointer;">
+        <input type="checkbox" data-import-check="${esc(e.id)}" ${checked} style="width:20px;height:20px;flex-shrink:0;" />
+        <div style="min-width:0;flex:1;">
           <div style="font-size:12.5px;font-weight:600;">📅 ${esc(e.date || "")}${e.clientCompany ? " ・ " + esc(e.clientCompany) : ""}</div>
           <div style="font-size:11.5px;color:#78716c;margin-top:2px;">${esc(workSummary)}</div>
+          ${isDone ? `<div style="font-size:11.5px;color:#16a34a;font-weight:700;margin-top:2px;">✅ 取り込み済み(${esc(isDone)})</div>` : ""}
+          ${bad ? `<div style="font-size:11.5px;color:#dc2626;font-weight:700;margin-top:2px;">⚠ 文字化けの可能性があります</div>` : ""}
         </div>
-        <button type="button" data-action="import-genba-entry" data-id="${esc(e.id)}" style="flex-shrink:0;font-size:12.5px;background:#1c1917;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">取り込む</button>
-      </div>`;
+      </label>`;
     }).join("");
     return head + rows;
   }).join("");
+}
+
+function importRefreshList() {
+  const listEl = document.getElementById("import-modal-list");
+  if (listEl) { listEl.innerHTML = renderImportModalListOnly(); bindImportEntryButtons(); }
+  const f = document.getElementById("import-footer");
+  if (f) { f.innerHTML = renderImportFooter(); bindImportFooter(); }
+}
+function bindImportFooter() {
+  const b = document.querySelector('[data-action="import-selected"]');
+  if (b) b.addEventListener("click", () => { const ids = importSelIds(); if (ids.length) importGenbaEntries(ids); });
+}
+function bindImportEntryButtons() {
+  document.querySelectorAll("[data-import-check]").forEach((c) => {
+    c.addEventListener("change", () => {
+      importModal.sel[c.dataset.importCheck] = c.checked;
+      const f = document.getElementById("import-footer");
+      if (f) { f.innerHTML = renderImportFooter(); bindImportFooter(); }
+    });
+  });
+  document.querySelectorAll("[data-import-site]").forEach((b) => {
+    b.addEventListener("click", () => {
+      importFiltered().filter((e) => (e.siteName || "") === b.dataset.importSite).forEach((e) => { importModal.sel[e.id] = true; });
+      importRefreshList();
+    });
+  });
+}
+function bindImportControls() {
+  const rf = () => importRefreshList();
+  const from = document.getElementById("import-from"), to = document.getElementById("import-to");
+  if (from) from.addEventListener("change", (e) => { importModal.from = e.target.value; rf(); });
+  if (to) to.addEventListener("change", (e) => { importModal.to = e.target.value; rf(); });
+  document.querySelectorAll("[data-import-range]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const r = monthRange(parseInt(b.dataset.importRange, 10));
+      importModal.from = r.from; importModal.to = r.to;
+      if (from) from.value = r.from; if (to) to.value = r.to;
+      rf();
+    });
+  });
+  document.querySelectorAll("[data-import-selall]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const on = b.dataset.importSelall === "1";
+      if (on) { const done = importedMap(); importFiltered().forEach((e) => { if (!done[e.id]) importModal.sel[e.id] = true; }); }
+      else importModal.sel = {};
+      rf();
+    });
+  });
+  bindImportFooter();
 }
 
 function uid() {
@@ -882,6 +1031,7 @@ function docToRecord() {
     savedAt: new Date().toISOString(),
     docType: state.docType,
     docNumber: state.docNumber,
+    importedEntryIds: state.importedEntryIds || [],
     docDate: state.docDate,
     workDate: state.workDate,
     startDate: state.startDate,
@@ -971,6 +1121,7 @@ function openDocument(id) {
   state.clientTel = doc.clientTel;
   state.clientFax = doc.clientFax;
   state.clientStaff = doc.clientStaff || "";
+  state.importedEntryIds = doc.importedEntryIds || [];
   state.siteName = doc.siteName;
   state.items = (doc.items && doc.items.length ? doc.items : [newLineItem()]).map((it) => Object.assign({}, it));
   state.tab = "作成";
@@ -990,6 +1141,7 @@ function copyDocument(id) {
   state.startDate = "";
   state.costs = normCosts(null);
   state.clientStaff = ""; // 担当者はその都度入力
+  state.importedEntryIds = [];
   state.items = state.items.map((it) => Object.assign({}, it, { id: uid() }));
   saveDraft();
   render();
@@ -1244,7 +1396,7 @@ function switchIssuer(name) {
     if (!confirm("編集中の書類を閉じて、「" + name + "」に切り替えます。(未保存の変更は破棄されます)よろしいですか?")) { render(); return; }
     state = Object.assign({}, state, {
       editingDocId: null, docDate: todayStr(), workDate: "", startDate: "", costs: normCosts(null),
-      clientName: "", clientHonorific: "様", clientPostal: "", clientAddress: "", clientTel: "", clientFax: "", clientStaff: "",
+      clientName: "", clientHonorific: "様", clientPostal: "", clientAddress: "", clientTel: "", clientFax: "", clientStaff: "", importedEntryIds: [],
       siteName: "", miscExpense: "", miscNote: "", eightPercentAmount: "", items: [newLineItem()],
     });
   }
@@ -1936,7 +2088,7 @@ function renderHeader() {
           <select id="view-issuer-input" style="margin:4px 0 2px;font-size:12px;font-weight:700;">
             ${Object.keys(ISSUER_PRESETS).map((k) => `<option value="${esc(k)}" ${state.issuerPreset === k ? "selected" : ""}>${esc(k === "ナカミネ" ? "株式会社ナカミネ" : k)}</option>`).join("")}
           </select>
-          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-11-21 a</p>
+          <p style="font-size:10px;color:#a8a29e;margin:2px 0 0;">版 2026-11-21 b</p>
         </div>
         <div style="text-align:right;flex-shrink:0;">
           <p style="font-size:11px;margin:2px 0 4px;">${status}</p>
@@ -2137,7 +2289,7 @@ function newDocFor(co, st, type) {
     editingDocId: null, docType: type, tab: "作成", docDate: todayStr(), workDate: "", startDate: "", costs: normCosts(null),
     clientName: co === NO_CLIENT ? "" : co, clientHonorific: known ? known.honorific : "様",
     clientPostal: known ? stripPostalMark(known.postal) : "", clientAddress: known ? known.address : "",
-    clientTel: known ? known.tel : "", clientFax: known ? known.fax : "", clientStaff: "",
+    clientTel: known ? known.tel : "", clientFax: known ? known.fax : "", clientStaff: "", importedEntryIds: [],
     siteName: !st || st === NO_SITE ? "" : st, miscExpense: "", miscNote: "", eightPercentAmount: "", items: [newLineItem()],
   });
   state.docNumber = getNextDocNumber(type);
@@ -2577,13 +2729,9 @@ function bindEvents() {
   const importSearchEl = document.getElementById("import-search-input");
   if (importSearchEl) importSearchEl.addEventListener("input", (e) => {
     importModal.query = e.target.value;
-    const listEl = document.getElementById("import-modal-list");
-    if (listEl) {
-      listEl.innerHTML = renderImportModalListOnly();
-      bindImportEntryButtons();
-    }
+    importRefreshList();
   });
-
+  bindImportControls();
   bindImportEntryButtons();
 
   const exportExcelBtn = document.querySelector('[data-action="export-excel"]');
@@ -2867,7 +3015,7 @@ function bindEvents() {
       state = Object.assign({}, state, {
         editingDocId: null,
         docNumber: getNextDocNumber(state.docType), docDate: todayStr(), workDate: "", startDate: "", costs: normCosts(null),
-        clientName: "", clientHonorific: "様", clientPostal: "", clientAddress: "", clientTel: "", clientFax: "", clientStaff: "",
+        clientName: "", clientHonorific: "様", clientPostal: "", clientAddress: "", clientTel: "", clientFax: "", clientStaff: "", importedEntryIds: [],
         siteName: "",
         miscExpense: "", miscNote: "", eightPercentAmount: "", items: [newLineItem()],
       });
