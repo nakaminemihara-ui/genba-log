@@ -144,7 +144,10 @@
 <div class="wrap" id="app"></div>
 
 <script>
-const WORK_TYPES = ["はつり", "コア抜き", "現場調査費", "レントゲン", "鉄筋探査", "雑工", "相番"];
+const WORK_TYPES = ["はつり", "コア抜き", "DPコア抜き", "コンクリ＋DP", "フェローデッキコア抜き", "現場調査費", "レントゲン", "鉄筋探査", "雑工", "相番"];
+// 径×長さ(厚み)の入力欄を出す作業内容
+const CORE_WORKS = ["コア抜き", "DPコア抜き", "コンクリ＋DP", "フェローデッキコア抜き"];
+function isCoreWork(w) { return CORE_WORKS.indexOf(w) !== -1; }
 const UNITS = ["本", "式", "人"];
 const STORAGE_KEY = "genba-entries-standalone";
 
@@ -198,7 +201,7 @@ async function loadEntries(silent) {
   }
   if (!silent) { state.syncing = true; render(); }
   try {
-    const res = await fetch(API_URL, { cache: "no-store" });
+    const res = await fetch(API_URL + "?t=" + Date.now() + Math.random().toString(36).slice(2, 6), { cache: "no-store" });
     const data = await res.json();
     state.entries = Array.isArray(data) ? data : [];
     state.syncError = false;
@@ -220,12 +223,15 @@ async function saveEntries() {
     return true;
   }
   state.syncing = true; render();
+  try { localStorage.setItem(STORAGE_KEY + "-last", JSON.stringify(state.entries)); } catch (e) {}
   let ok = false;
+  state.lastError = "";
   for (let attempt = 0; attempt < 2 && !ok; attempt++) {
     try {
       const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(state.entries) });
       const data = await res.json().catch(() => null);
-      ok = !data || data.ok !== false;
+      ok = !!data && data.ok === true;
+      if (!ok) state.lastError = data && data.error ? data.error : "サーバーから正しい返事がありません";
     } catch (e) {
       console.error("保存に失敗しました", e);
       ok = false;
@@ -235,6 +241,42 @@ async function saveEntries() {
   state.syncError = !ok;
   state.syncing = false;
   return ok;
+}
+
+// ---- ひとつ前に戻る(削除・更新・追加の取り消し) ----
+const UNDO_KEY = STORAGE_KEY + "-undo";
+function undoStack() { try { return JSON.parse(localStorage.getItem(UNDO_KEY) || "[]"); } catch (e) { return []; } }
+function undoPush(op) {
+  const st = undoStack(); st.push(op);
+  while (st.length > 30) st.shift();
+  try { localStorage.setItem(UNDO_KEY, JSON.stringify(st)); } catch (e) {}
+}
+function undoPop() {
+  const st = undoStack(); const op = st.pop();
+  try { localStorage.setItem(UNDO_KEY, JSON.stringify(st)); } catch (e) {}
+  return op;
+}
+async function doUndo() {
+  if (state.undoing) return;
+  const st = undoStack();
+  if (!st.length) return;
+  const op = st[st.length - 1];
+  const label = op.type === "del" ? "削除した記録を元に戻します" : op.type === "edit" ? "更新前の内容に戻します" : "追加した記録を取り消します";
+  if (!confirm(label + "。よろしいですか?\n(" + (op.entry ? op.entry.siteName : op.id ? "" : "") + ")")) return;
+  state.undoing = true;
+  if (API_URL) await loadEntries(true);
+  if (op.type === "del") {
+    if (!state.entries.some((e) => e.id === op.entry.id)) state.entries.push(op.entry);
+  } else if (op.type === "edit") {
+    const i = state.entries.findIndex((e) => e.id === op.entry.id);
+    if (i === -1) state.entries.push(op.entry); else state.entries[i] = op.entry;
+  } else if (op.type === "add") {
+    state.entries = state.entries.filter((e) => e.id !== op.id);
+  }
+  const ok = await saveEntries();
+  state.undoing = false;
+  if (ok) undoPop(); else alert("元に戻せませんでした。通信状況を確認してもう一度お試しください。");
+  render();
 }
 
 function fmtYen(n) {
@@ -254,7 +296,7 @@ function entryTotal(items) {
 }
 
 function sizeLabel(it) {
-  if (it.work === "コア抜き" && (it.diameter || it.length)) {
+  if (isCoreWork(it.work) && (it.diameter || it.length)) {
     return "Φ" + (it.diameter || "-") + "×" + (it.length || "-");
   }
   if (it.work === "はつり" && (it.width || it.haturiLength || it.depth)) {
@@ -430,12 +472,13 @@ function renderListTab() {
   if (!state.showForm) {
     html += `
       <button class="btn-primary" data-action="open-form">+ 新規記録</button>
+      <button class="btn-primary" data-action="undo" style="background:#fff;color:#334155;border:1px solid #cbd5e1;${undoStack().length ? "" : "opacity:.4;"}" ${undoStack().length ? "" : "disabled"}>↩ ひとつ前に戻る(${undoStack().length})</button>
       ${renderRangeBox()}
       <div class="search-wrap">
         <span class="icon">🔍</span>
         <input type="text" id="search-input" placeholder="現場名・発注会社名で検索" value="${esc(state.query)}" />
       </div>
-      <p class="hint">ゴミ箱アイコンを長押しすると削除できます</p>
+      <p class="hint">ゴミ箱を押すと「削除しますか」と確認が出ます(「はい」を押すまで消えません)</p>
       ${renderEntryList()}
     `;
   } else {
@@ -495,7 +538,7 @@ function renderEntryList() {
               <div class="date">📅 ${esc(e.date)}</div>
               <div style="display:flex;gap:4px;">
                 <button class="del-btn" data-action="edit-entry" data-id="${e.id}" aria-label="編集">✏️</button>
-                <button class="del-btn" data-action="del-entry" data-id="${e.id}" aria-label="長押しで削除">🗑</button>
+                <button class="del-btn" data-action="del-entry" data-id="${e.id}" aria-label="削除">🗑</button>
               </div>
             `}
           </div>
@@ -574,7 +617,7 @@ function renderForm() {
 
 function renderLineItem(it) {
   let sizeBlock = "";
-  if (it.work === "コア抜き") {
+  if (isCoreWork(it.work)) {
     sizeBlock = `
       <div class="size-row">
         <span class="sep">Φ</span>
@@ -608,7 +651,7 @@ function renderLineItem(it) {
             <button class="no" data-action="cancel-delete-line">いいえ</button>
           </div>
         ` : `
-          <button class="del-btn" data-action="del-line" data-id="${it.id}" aria-label="長押しでこの行を削除">🗑</button>
+          <button class="del-btn" data-action="del-line" data-id="${it.id}" aria-label="この行を削除">🗑</button>
         `}
       </div>
       ${sizeBlock}
@@ -856,6 +899,9 @@ function bindEvents() {
     render();
   });
 
+  const undoBtn = document.querySelector('[data-action="undo"]');
+  if (undoBtn) undoBtn.addEventListener("click", doUndo);
+
   const closeBtn = document.querySelector('[data-action="close-form"]');
   if (closeBtn) closeBtn.addEventListener("click", () => {
     state.showForm = false;
@@ -902,11 +948,7 @@ function bindEvents() {
   // entry delete (long press)
   document.querySelectorAll('[data-action="del-entry"]').forEach((btn) => {
     const id = btn.dataset.id;
-    btn.addEventListener("mousedown", () => pressStart(() => { state.confirmDeleteId = id; render(); }));
-    btn.addEventListener("touchstart", () => pressStart(() => { state.confirmDeleteId = id; render(); }));
-    btn.addEventListener("mouseup", pressEnd);
-    btn.addEventListener("mouseleave", pressEnd);
-    btn.addEventListener("touchend", pressEnd);
+    btn.addEventListener("click", () => { state.confirmDeleteId = id; render(); });
   });
   document.querySelectorAll('[data-action="confirm-delete-entry"]').forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -920,8 +962,10 @@ function bindEvents() {
         const stillThere = state.entries.some((e) => e.id === id);
         if (!stillThere) { success = true; break; }
         const before = state.entries;
+        const delEntry = state.entries.find((e) => e.id === id);
         state.entries = state.entries.filter((e) => e.id !== id);
         const saved = await saveEntries();
+        if (saved && delEntry && !state.undoLogged) { undoPush({ type: "del", entry: delEntry }); state.undoLogged = true; }
         if (saved && API_URL) {
           await loadEntries(true);
           success = !state.entries.some((e) => e.id === id);
@@ -932,6 +976,7 @@ function bindEvents() {
         }
       }
       state.deletingId = null;
+      state.undoLogged = false;
       if (!success) {
         alert("削除に失敗しました。通信状況を確認してもう一度お試しください。");
       }
@@ -985,11 +1030,7 @@ function bindEvents() {
 
   document.querySelectorAll('[data-action="del-line"]').forEach((btn) => {
     const id = btn.dataset.id;
-    btn.addEventListener("mousedown", () => pressStart(() => { state.confirmDeleteLineId = id; render(); }));
-    btn.addEventListener("touchstart", () => pressStart(() => { state.confirmDeleteLineId = id; render(); }));
-    btn.addEventListener("mouseup", pressEnd);
-    btn.addEventListener("mouseleave", pressEnd);
-    btn.addEventListener("touchend", pressEnd);
+    btn.addEventListener("click", () => { state.confirmDeleteLineId = id; render(); });
   });
   document.querySelectorAll('[data-action="confirm-delete-line"]').forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1024,6 +1065,12 @@ function bindEvents() {
 }
 
 async function saveEntry() {
+  if (state.saving) return;
+  state.saving = true;
+  try { await saveEntryInner(); } finally { state.saving = false; }
+}
+
+async function saveEntryInner() {
   if (!state.formSiteName.trim()) {
     state.formError = "現場名を入力してください";
     render();
@@ -1053,6 +1100,7 @@ async function saveEntry() {
       lineItems: cleanItems.length > 0 ? cleanItems : state.formLineItems,
     };
     ok = await saveEntries();
+    if (ok) undoPush({ type: "edit", entry: before });
     if (!ok) {
       state.entries[idx] = before;
       alert("更新に失敗しました。通信状況を確認してもう一度お試しください。");
@@ -1069,12 +1117,18 @@ async function saveEntry() {
     };
     state.entries.push(entry);
     ok = await saveEntries();
+    if (ok && API_URL) {
+      // 本当にシートに入ったか読み直して確認する
+      await loadEntries(true);
+      if (!state.entries.some((e) => e.id === entry.id)) ok = false;
+    }
     if (!ok) {
-      alert("保存に失敗しました。通信状況を確認してもう一度お試しください。");
+      alert("保存に失敗しました。入力内容はそのまま残してあります。もう一度「保存する」を押してください。" + (state.lastError ? "\n(" + state.lastError + ")" : ""));
       state.entries = state.entries.filter((e) => e.id !== entry.id);
       render();
       return;
     }
+    undoPush({ type: "add", id: entry.id });
   }
 
   state.formSiteName = "";
