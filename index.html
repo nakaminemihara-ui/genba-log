@@ -235,6 +235,7 @@ async function saveEntries() {
     } catch (e) {
       console.error("保存に失敗しました", e);
       ok = false;
+      state.lastError = "通信エラー: " + (e && e.message ? e.message : e);
     }
     if (!ok && attempt === 0) await new Promise((r) => setTimeout(r, 700));
   }
@@ -1120,7 +1121,8 @@ async function saveEntryInner() {
     if (ok && API_URL) {
       // 本当にシートに入ったか読み直して確認する
       await loadEntries(true);
-      if (!state.entries.some((e) => e.id === entry.id)) ok = false;
+      if (state.syncError) { state.lastError = "保存後の確認で読み込みに失敗"; ok = false; }
+      else if (!state.entries.some((e) => e.id === entry.id)) { state.lastError = "保存したのにシートに入っていません(データ量が上限の可能性: " + JSON.stringify(state.entries).length + "文字)"; ok = false; }
     }
     if (!ok) {
       alert("保存に失敗しました。入力内容はそのまま残してあります。もう一度「保存する」を押してください。" + (state.lastError ? "\n(" + state.lastError + ")" : ""));
